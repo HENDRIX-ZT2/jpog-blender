@@ -33,10 +33,12 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			break
 	# implement ZT2 like filtering at some point
 	animations = bpy.data.actions
-	remaining_bytes = 0
-	#tkl_ref = "Df"
-	magic_value1 = 1
-	magic_value2 = 2
+	
+	#uncommon:
+	#magic_value1 2316361
+	#magic_value2 136
+	magic_value1 = 3299401
+	magic_value2 = 1960
 	salt = 1
 	u1 = 1
 	u2 = 1
@@ -93,7 +95,17 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		channel_pointer_bytes = []
 		channel_bytes = []
 		
-		channel_pointer_bytes.append(pack('B 15s 3I f', len(action.name), action.name.encode("utf-8"), 0, 0, len(bones), action.frame_range[1]/fps))
+		#by definition, a secondary anim will have some bones unkeyframed
+		#comparing the len could be quicker but less accurate
+		is_secondary = 0
+		for bone_name in bones:
+			if bone_name not in action.groups:
+				is_secondary = 1
+				break
+		#not sure
+		has_sound = 0
+		channel_pointer_bytes.append(pack('B 15s 3I f', len(action.name), action.name.encode("utf-8"), is_secondary, has_sound, len(bones), action.frame_range[1]/fps))
+		
 		for bone_name in bones:
 			channel_pointer_bytes.append(pack('I', offset - 60 + salt))
 			if bone_name in action.groups:
@@ -166,39 +178,17 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	print("\nWriting",tkl_path)
 	f = open(tkl_path, 'wb')
 	
-	tkl_b00 = 0
-	tkl_b01 = 0
-	tkl_b02 = 0
-	tkl_b03 = 0
-	tkl_remaining_bytes = 0
-	tkl_b04 = 0
-	tkl_b05 = 0
-	tkl_b06 = 0
-	tkl_b07 = 0
-	tkl_b08 = 0
-	tkl_b09 = 0
-	tkl_b10 = 0
-	tkl_b11 = 0
-	tkl_b12 = 0
-	tkl_b13 = 0
-	tkl_i00 = 0
-	tkl_i01 = 0
-	tkl_i02 = 0
-	tkl_i03 = 0
-	tkl_i04 = 0
-	
-	tkl_header = pack("4s 4B I 6s 10B 2I 5I", b"TPKL", tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_ref.encode("utf-8"), tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, len(all_locs), len(all_quats), tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04)
-	#tkl_i04 probably another size value, close to tkl_remaining_bytes
-	
 	tkl_locs = [pack("3f", *l) for l in all_locs]
 	tkl_quats = [pack("4f", q.x, q.y, q.z, q.w) for q in all_quats]
-	
+	tkl_len_data = len(tkl_locs)*16 + len(tkl_quats)*12
+	#54 or 39- both exist?
+	x = 54
+	tkl_header = pack("4s I I 6s 10B 2I 5I", b"TPKL", 0, tkl_len_data+44, tkl_ref.encode("utf-8"), x, 0, 160, 152, x, 0, 212, 254, 18, 0, len(all_locs), len(all_quats), 0, 12, 16, 4, tkl_len_data)
 	f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
 	f.close()
 	
 	
 	lod_bytes = []
-	
 	lods = []
 	for i in range(0,10):
 		lod = [ob for ob in bpy.data.objects if "_LOD"+str(i) in ob.name]
