@@ -7,6 +7,15 @@ from struct import iter_unpack, unpack_from
 from subprocess import check_call
 from .utils.tristrip import triangulate
 
+def get_text():
+	text_name = "JPOG.txt"
+	if text_name not in bpy.data.texts:
+		text_ob = bpy.data.texts.new(text_name)
+	else:
+		text_ob = bpy.data.texts[text_name]
+	return text_ob
+
+
 def export_matrix(mat):
 	bytes = b''
 	for row in mat: bytes += pack('=4f',*row)
@@ -81,6 +90,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 	
+	#store unknown variables to retrieve them on export
+	vars = {}
+	
 	#set the visible layers for this scene
 	bools = []
 	for i in range(20):	 
@@ -108,6 +120,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", datastream, 60)
 	aux_node_data, node_data, anim_pointer = unpack_from("3I", datastream, 60+56)
 	
+	vars["salt"] = salt
+	vars["u1"] = u1
+	vars["u2"] = u2
+	vars["u3"] = u3
+	vars["u4"] = u4
 	
 	#print(aux_node_data, node_data, anim_pointer)
 	#decrypt the addresses
@@ -191,7 +208,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	pos = lod_data_offset + 60
 	#124 124 5756
 	# = 206568 + 60
-	print(lod_data_offset)
+	#print(lod_data_offset)
 	#max_lod_distance just a guess but sound, and 
 	num_lods, max_lod_distance = unpack_from("I f", datastream, pos)
 	print("max_lod_distance", max_lod_distance)
@@ -293,7 +310,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				face.use_smooth = True
 			if use_custom_normals:
 				me.use_auto_smooth = True
-				bpy.ops.mesh.customdata_custom_splitnormals_add()
+				#doesn't seem to need either in current blender, but the normals are not exactly as intended
+				#bpy.ops.mesh.customdata_custom_splitnormals_add()
+				#me.calc_normals_split()
 				me.normals_split_custom_set(no_array)
 			
 			#UV: flip V coordinate
@@ -492,7 +511,12 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				#break
 	except:
 		log_error('Material creation failed!')
-
+	
+	#store the vars
+	text_ob = get_text()
+	text_ob.clear()
+	text_ob.write(str(vars))
+	
 	success = '\nFinished TMD Import in %.2f seconds\n' %(time.clock()-starttime)
 	print(success)
 	return errors

@@ -19,33 +19,50 @@ def log_error(error):
 			
 def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, create_lods = False, numlods = 1, rate = 1):
 
+	starttime = time.clock()
+	global errors
+	errors = []
+
+	text_name = "JPOG.txt"
+	if text_name in bpy.data.texts:
+		text_ob = bpy.data.texts[text_name]
+	else:
+		log_error("You must import a TMD file before you can export one!")
+		return errors
+	
+	#get the vars
+	#text_ob = get_text()
+	#yes bad but I am lazy
+	vars = eval(text_ob.as_string())
+	print(vars)
+	
+	
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 	
 	tkl_ref = os.path.basename(filepath[:-4])[:6]
 	print(tkl_ref)
-	starttime = time.clock()
-	global errors
-	errors = []
 	
 	for armature in bpy.data.objects:
 		if type(armature.data) == bpy.types.Armature:
 			break
-	# implement ZT2 like filtering at some point
+	# implement ZT2 like filtering at some point, so only baked anims are exported
 	animations = bpy.data.actions
 	
+	#probably version number
 	#uncommon:
 	#magic_value1 2316361
 	#magic_value2 136
+	#more common
 	magic_value1 = 3299401
 	magic_value2 = 1960
-	salt = 1
-	u1 = 1
-	u2 = 1
+	salt = vars["salt"]
+	u1 = vars["u1"]
+	u2 = vars["u2"]
 	scene_block_bytes = 0
-	u3 = 0
+	u3 = vars["u3"]
 	num_anims = len(animations)
-	u4 = 0
+	u4 = vars["u4"]
 	node_data = 124
 	anim_pointer = node_data + 176 * len(armature.data.bones)
 	#lod_data_offset = anim_pointer
@@ -322,7 +339,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	print("node_data",node_data)
 	print("anim_pointer",anim_pointer)
 	print("lod_offset",lod_offset)
-	header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", scene_block_bytes, len(armature.data.bones), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
+	header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(armature.data.bones), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
 	#main_data = 
 	f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 	f.close()
