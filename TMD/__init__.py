@@ -6,6 +6,7 @@ bl_info = {	"name": "Toshi TMD format (JPOG)",
 			"warning": "",
 			"support": 'COMMUNITY',
 			"category": "Import-Export"}
+			
 # #need this?
 if "bpy" in locals():
 	import importlib
@@ -13,18 +14,6 @@ if "bpy" in locals():
 		importlib.reload(import_tmd)
 	if "export_tmd" in locals():
 		importlib.reload(export_tmd)
-	# if "import_dat" in locals():
-		# importlib.reload(import_dat)
-	# if "export_TMD" in locals():
-		# importlib.reload(export_TMD)
-	# if "export_dat" in locals():
-		# importlib.reload(export_dat)
-	# if "batch_TMD" in locals():
-		# importlib.reload(batch_TMD)
-	# if "import_bf" in locals():
-		# importlib.reload(import_bf)
-	# if "export_bf" in locals():
-		# importlib.reload(export_bf)
 
 import bpy
 from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, CollectionProperty
@@ -39,9 +28,9 @@ class ImportTMD(bpy.types.Operator, ImportHelper):
 	bl_label = 'Import TMD'
 	bl_options = {'UNDO'}
 	filename_ext = ".TMD"
-	filter_glob = StringProperty(default="*.TMD", options={'HIDDEN'})
+	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	use_custom_normals = BoolProperty(name="Use TMD Normals", description="Preserves the original shading of a TMD.", default=False)
-	use_anims = BoolProperty(name="Import Anims", description="If anims are imported, the skeleton looks ugly. If this is disabled, you get a clean skeleton.", default=False)
+	use_anims = BoolProperty(name="Import Anims", description="If anims are imported, the skeleton looks ugly. If this is disabled, you get a clean skeleton.", default=True)
 	#mirror_mesh = BoolProperty(name="Mirror Rigged Meshes", description="Mirrors models with a skeleton. Careful, sometimes bones don't match!", default=True)
 	def execute(self, context):
 		from . import import_tmd
@@ -56,9 +45,9 @@ class ExportTMD(bpy.types.Operator, ExportHelper):
 	bl_idname = "export_scene.toshi_tmd"
 	bl_label = 'Export TMD'
 	filename_ext = ".TMD"
-	filter_glob = StringProperty(default="*.TMD", options={'HIDDEN'})
-
-	# export_materials = BoolProperty(name="Export Materials", description="Should BFMAT materials be exported? Beware, they might not be identical to the existing material!", default=True)
+	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
+	export_anims = BoolProperty(name="Export Anims", description="If checked, animations are exported from blender. If not, keyframes are copied from the imported TMD and no TKL is created.", default=False)
+	append_anims = BoolProperty(name="Append Anims", description="If checked, the original keyframes are included in the exported TKL file. If not, only the keyframes from blender are written.", default=False)
 	# author_name = StringProperty(name="Author", description="A signature included in the TMD file.", default=author)
 	# create_lods = BoolProperty(name="Create LODs", description="Adds Levels of Detail - overwrites existing LODs!", default=True)
 	# numlods = IntProperty(	name="Number of LODs",

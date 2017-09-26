@@ -15,7 +15,6 @@ def get_text():
 		text_ob = bpy.data.texts[text_name]
 	return text_ob
 
-
 def export_matrix(mat):
 	bytes = b''
 	for row in mat: bytes += pack('=4f',*row)
@@ -115,11 +114,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	f.close()
 	
 	#header
-	#len() everythin after remaining_bytes
 	remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2	 = unpack_from("I 8s 2L 4I", datastream, 8)
 	scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", datastream, 60)
 	aux_node_data, node_data, anim_pointer = unpack_from("3I", datastream, 60+56)
 	
+	vars["tmd_path"] = filepath
 	vars["salt"] = salt
 	vars["u1"] = u1
 	vars["u2"] = u2
@@ -204,6 +203,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			else:
 				bone.length = bone.parent.length
 	bpy.ops.object.mode_set(mode = 'OBJECT')
+	armature.layers = select_layer(5)
 
 	pos = lod_data_offset + 60
 	#124 124 5756
@@ -223,10 +223,10 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	for level in range(0,num_lods):
 		#possibly LOD extents, ie. near far distance and bias?
 		#note that these values are the same for all lods
-		num_meshes_in_lod, u6, f0, f1, f2, f3 = unpack_from("I f 4f ", datastream, pos)
+		num_meshes_in_lod, u6, s_x, s_y, s_z, d = unpack_from("I f 4f ", datastream, pos)
 		
 		print("Meshes in LOD:",num_meshes_in_lod)
-		print(u6, f0, f1, f2, f3)
+		print(u6, s_x, s_y, s_z, d)
 		pos+=24
 		for mesh in range(0,num_meshes_in_lod):
 			num_pieces, num_all_strip_indices, num_all_verts, matname = unpack_from("3I 32s ", datastream, pos)
@@ -291,7 +291,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			bpy.context.scene.objects.link(ob)
 			bpy.context.scene.objects.active = ob
 			ob.layers = select_layer(level)
-			#ob.layers = select_layer(5)
 			
 			#weight painting
 			ob.parent = armature
@@ -302,6 +301,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 					#could also do this in a preceding loop via used indices - faster!
 					if bone_name not in ob.vertex_groups: ob.vertex_groups.new(bone_name)
 					ob.vertex_groups[bone_name].add([i], weight, 'REPLACE')
+					
+			#UV: flip V coordinate
+			me.uv_textures.new("UV")
+			me.uv_layers[-1].data.foreach_set("uv", [uv for pair in [mesh_verts[l.vertex_index][14:16] for l in me.loops] for uv in (pair[0], -pair[1])])
+			
 			#build a correctly sorted normals array, sorted by the order of faces - loops does not work!!
 			no_array = []
 			for face in me.polygons:
@@ -314,14 +318,18 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				#bpy.ops.mesh.customdata_custom_splitnormals_add()
 				#me.calc_normals_split()
 				me.normals_split_custom_set(no_array)
-			
-			#UV: flip V coordinate
-			me.uv_textures.new("UV")
-			me.uv_layers[-1].data.foreach_set("uv", [uv for pair in [mesh_verts[l.vertex_index][14:16] for l in me.loops] for uv in (pair[0], -pair[1])])
+				
+			#so ugly, working with context and operators - perhaps there is a better solution
+			bpy.context.scene.objects.active = ob
+			bpy.ops.object.mode_set(mode = 'EDIT')
+			bpy.ops.mesh.remove_doubles(threshold = 0.0001, use_unselected = False)
+			bpy.ops.uv.seams_from_islands()
+			bpy.ops.object.mode_set(mode = 'OBJECT')
 	
+	tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref.split(b"\x00")[0].decode("utf-8")+".tkl")
+	vars["tkl_path"] = tkl_path
 	if use_anims:
 		#read the tkl
-		tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref.split(b"\x00")[0].decode("utf-8")+".tkl")
 		print("\nReading",tkl_path)
 		f = open(tkl_path, 'rb')
 		tklstream = f.read()
