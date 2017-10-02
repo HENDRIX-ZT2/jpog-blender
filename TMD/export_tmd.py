@@ -181,7 +181,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					break
 			#not sure
 			has_sound = 0
-			channel_pointer_bytes.append(pack('B 15s 3I f', len(action.name), action.name.encode("utf-8"), is_secondary, has_sound, len(bones), action.frame_range[1]/fps))
+			channel_pointer_bytes.append(pack('B 15s 3I f', len(action.name), action.name.encode("utf-8"), is_secondary, has_sound, len(bone_names), action.frame_range[1]/fps))
 			
 			for bone_name in bone_names:
 				channel_pointer_bytes.append(pack('I', offset - 60 + salt))
