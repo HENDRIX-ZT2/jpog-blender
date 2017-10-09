@@ -334,51 +334,84 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			#maybe split mesh_triangles here?
 			#Yeah, my code first divides up the mesh into chunks with <=28 bones. Then divides those chunks up so they don't have more than 7500 entries in the tristrip
 			
-			#print(mesh_triangles)
 			tristrips = stripify(mesh_triangles, stitchstrips = True)
 			print(ob.name)
 			
-			#dummies
-			num_pieces = len(tristrips)
-			#wrong
-			num_all_strip_indices = len(*tristrips)
+			matname = me.materials[0].name
+			
+			#there is just one strip
+			in_strip = tristrips[0]
+			
+			strips_split = []
+			pos = 1
+			#then we must split
+			if len(in_strip) > 7500:
+				while pos != len(in_strip)-1:
+					start = pos
+					pos += 7500
+					if pos > len(in_strip)-1:
+						pos = len(in_strip)-1
+					strips_split.append(in_strip[start-1:pos])
+			else:
+				strips_split = tristrips
+				
+			#strips_split = [tristrips[0][0:7500],]
+			
+			num_pieces = len(strips_split)
+			#wrong?
+			num_all_strip_indices = sum([len(strip) for strip in strips_split])
 			num_all_verts = len(dummy_vertices)
 			del dummy_vertices
-			matname = me.materials[0].name
 			print("num_pieces",num_pieces)
 			print("num_all_strip_indices",num_all_strip_indices)
 			print("num_all_verts",num_all_verts)
 			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, matname.encode("utf-8")))
+			
+			
 			all_vert_indices = []
-			for strip in tristrips:
+			for strip in strips_split:
 				#these are used for two things: keep track of what was added, and get num  in this piece
 				piece_vert_indices = []
-				#needs to be taken care of later when splitting is supported
-				num_verts = num_all_verts
+				
 				#note that these are for the whole object and not the piece - might have to be adjusted
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
 				bbe_x, bbe_y, bbe_z = ob.dimensions
 				
 				vert_bytes = []
 				piece_bone_names = []
-				for i in range(0,len(verts)):
-					#could probably be optimized
-					if i not in piece_vert_indices:
-						if i not in all_vert_indices:
-							piece_vert_indices.append(i)
-							vert, w_s, b_uv = verts[i]
-							#index the bone names, and build the list of bones used in this piece's strip
-							b = []
-							w = []
-							for bone_name, weight in w_s:
-								if bone_name:
-									if bone_name not in piece_bone_names:
-										piece_bone_names.append(bone_name)
-									b.append( int(piece_bone_names.index(bone_name) * 3) )
-								else:
-									b.append( 0 )
-								w.append( int(weight * 255) )
-							vert_bytes.append(b"".join((vert, pack("4B 4B", *w, *b ), b_uv)))
+				
+				
+				#so, this code should
+				#create the list of bones referred by this piece's tri strip
+				#see which verts are referred by this tri strip
+				
+				#this spreads the verts & weights over the pieces, but it messes up the tris and weights
+				#for i in sorted(strip):
+				
+				#current solution is a bit inefficient, a bone is added to a piece regardless if it is used in the piece.
+				
+				#now write this piece's vertices
+				for i in range(0, num_all_verts):
+				
+					#is it referenced in this piece
+					vert, w_s, b_uv = verts[i]
+					#index the bone names, and build the list of bones used in this piece's strip
+					b = []
+					w = []
+					for bone_name, weight in w_s:
+						if bone_name:
+							if bone_name not in piece_bone_names:
+								#if len(piece_bone_names) = 28: new piece
+								piece_bone_names.append(bone_name)
+							b.append( int(piece_bone_names.index(bone_name) * 3) )
+						else:
+							b.append( 0 )
+						w.append( int(weight * 255) )
+					if i not in piece_vert_indices and i not in all_vert_indices:
+						piece_vert_indices.append(i)
+						vert_bytes.append(b"".join((vert, pack("4B 4B", *w, *b ), b_uv)))
+				
+				#print(piece_bone_names)
 				if len(piece_bone_names) >> 28:
 					log_error("More than 28 bones are used in a mesh piece!")
 				all_vert_indices.extend(piece_vert_indices)
