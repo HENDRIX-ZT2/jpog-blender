@@ -354,11 +354,8 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					strips_split.append(in_strip[start-1:pos])
 			else:
 				strips_split = tristrips
-				
-			#strips_split = [tristrips[0][0:7500],]
 			
 			num_pieces = len(strips_split)
-			#wrong?
 			num_all_strip_indices = sum([len(strip) for strip in strips_split])
 			num_all_verts = len(dummy_vertices)
 			del dummy_vertices
@@ -411,9 +408,11 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 						piece_vert_indices.append(i)
 						vert_bytes.append(b"".join((vert, pack("4B 4B", *w, *b ), b_uv)))
 				
-				#print(piece_bone_names)
-				if len(piece_bone_names) >> 28:
+				print("num_piece_bones",len(piece_bone_names))
+				if len(piece_bone_names) > 28:
 					log_error("More than 28 bones are used in a mesh piece!")
+					return errors
+					
 				all_vert_indices.extend(piece_vert_indices)
 				
 				#write the mesh_piece header
