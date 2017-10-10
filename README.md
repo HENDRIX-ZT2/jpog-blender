@@ -1,6 +1,6 @@
 jpog-blender
 
-A toolset for blender allowing the import and experimental export of Jurassic Park - Operation Genesis models, textures and animations into blender.
+A toolset for blender allowing the import and export of Jurassic Park - Operation Genesis models, textures and animations.
 
 Credits:
 
