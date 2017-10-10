@@ -19,6 +19,7 @@ def log_error(error):
 			
 def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, export_anims = False, create_lods = False, append_anims = False, numlods = 1, rate = 1):
 
+	print("\nStarting export to",filepath)
 	starttime = time.clock()
 	global errors
 	errors = []
@@ -34,7 +35,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	#text_ob = get_text()
 	#yes bad but I am lazy
 	vars = eval(text_ob.as_string())
-	print(vars)
+	#print(vars)
 	
 	
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
@@ -292,141 +293,163 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		f3 = 0.9 * max_lod_distance
 		lod_bytes.append(pack('I f 4f ',len(lod), 0, f0, f1, f2, f3))
 		for ob in lod:
+			print("Processing mesh of",ob.name)
 			#these are the meshes
 			me = ob.data
 			
-			#first, convert blender polys into TMD "tris"
-			mesh_triangles = []
-			#to facilitate the building of the right mesh array
-			dummy_vertices = []
-			#we can not build the proper array yet because we need per-piece bone mapping, which we can only get in the second step
-			verts = []
-			uv_layer = me.uv_layers[0]
+			#initialize the piece lists
+			max_pieces = 4
+			bones_pieces = []
+			tris_pieces = []
+			for i in range(0, max_pieces):
+				bones_pieces.append([])
+				tris_pieces.append([])
+				
+			print("First Splitting")
+			#first step:
+			#go over all triangles, see which bones their verts use, see which tri goes into which piece
 			for polygon in me.polygons:
-				tri=[]
+				tri_bones = set()
 				for loop_index in polygon.loop_indices:
 					vertex = me.vertices[me.loops[loop_index].vertex_index]
-					co = vertex.co
-					no = me.loops[loop_index].normal
-					b_co = pack('3f', co.x, co.y, co.z, )
-					b_uv = pack('2f', uv_layer.data[loop_index].uv.x, -uv_layer.data[loop_index].uv.y)
-					dummy_vert = b_co + b_uv
-					#we have to add new verts also if the UV is different!
-					if dummy_vert not in dummy_vertices:
-						w = []
-						#we can only look up the name here, and index it per piece
-						for vertex_group in vertex.groups:
-							#dummy vertex groups without corresponding bones
-							try: w.append((ob.vertex_groups[vertex_group.group].name, vertex_group.weight))
-							except: pass
-						#only use the 4 biggest keys
-						w_s = sorted(w, key = lambda x:x[1], reverse = True)[0:4]
-						#pad the weight list to 4 bones, ie. add empty bones if missing
-						for i in range(0, 4-len(w_s)): w_s.append((None,0))
+					#we can only look up the name here, and index it per piece
+					for vertex_group in vertex.groups:
+						bone_name = ob.vertex_groups[vertex_group.group].name
+						bone_weight = vertex_group.weight
+						#should this vertex group be used?
+						if bone_weight > 0 and bone_name in bone_names:
+							#add it to the set
+							tri_bones.add(bone_name)
+					
+				#go over all pieces and see where we can add this tri
+				for i in range(0, max_pieces):
+					#see how many bones this triangle would add to the piece
+					bones_to_add = sum([1 for bone_name in tri_bones if bone_name not in bones_pieces[i]])
+					
+					#so can we add it to this piece? if not go to the next loop/piece
+					if len(bones_pieces[i]) + bones_to_add > 28:
+						continue
+						
+					#ok we can add it, so add it to the bones
+					#add only unique - don't use a set here because it must be sorted. then we can do the bone lookup in the same step
+					#all second order pieces will use the same bone list!
+					for bone_name in tri_bones:
+						if bone_name not in bones_pieces[i]:
+							bones_pieces[i].append(bone_name)
+					
+					#also add the tri
+					tris_pieces[i].append(polygon.loop_indices)
+					
+					#ok, done, skip the other pieces because the tri is already added
+					break
+			mesh_verts = []
+			uv_layer = me.uv_layers[0]
+			piece_data = []
+			mesh_vertices = []
+			#do the second splitting
+			for piece_i in range(0, max_pieces):
+				if bones_pieces[piece_i]:
+					print("\nProcessing temp piece", piece_i)
+					print("temp num tris:", len(tris_pieces[piece_i]))
+					print("temp num bones:", len(bones_pieces[piece_i]))
+					
+					#at this point we have the tris in the right pieces, so all verts that are used in piece 0 will exist for piece 1 (incase we want to reuse them)
+					tmd_piece_tris = []
+					for tri in tris_pieces[piece_i]:
+						tmd_tri=[]
+						for loop_index in tri:
+							vertex = me.vertices[me.loops[loop_index].vertex_index]
+							co = vertex.co
+							no = me.loops[loop_index].normal
+							w = []
+							#we can only look up the name here, and index it per piece
+							for vertex_group in vertex.groups:
+								bone_name = ob.vertex_groups[vertex_group.group].name
+								bone_weight = vertex_group.weight
+								#should this vertex group be used?
+								if bone_weight > 0 and bone_name in bone_names:
+									w.append((bone_name, bone_weight))
 
-						b_no = pack('3f', no.x, no.y, no.z, )
-						dummy_vertices.append(dummy_vert)
-						verts.append((b_co + b_no, w_s, b_uv))
-					#get the corrected index for this tri
-					tri.append(dummy_vertices.index(dummy_vert))
-				mesh_triangles.append(tri)
-				
-			#maybe split mesh_triangles here?
-			#Yeah, my code first divides up the mesh into chunks with <=28 bones. Then divides those chunks up so they don't have more than 7500 entries in the tristrip
+							#only use the 4 biggest keys
+							w_s = sorted(w, key = lambda x:x[1], reverse = True)[0:4]
+							
+							#pad the weight list to 4 bones, ie. add empty bones if missing
+							for i in range(0, 4-len(w_s)): w_s.append((0,0))
+
+							#index the bone names, and build the list of bones used in this piece's strip
+							b = []
+							w = []
+							for bone_name, weight in w_s:
+								if bone_name:
+									b.append( int(bones_pieces[piece_i].index(bone_name) * 3) )
+								else:
+									b.append( 0 )
+								w.append( int(weight * 255) )
+															
+							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer.data[loop_index].uv.x, -uv_layer.data[loop_index].uv.y )
+							if vert not in mesh_vertices:
+								mesh_vertices.append(vert)
+							
+							# #get the corrected index for this tri
+							tmd_tri.append(mesh_vertices.index(vert))
+						tmd_piece_tris.append(tmd_tri)
+					#there is just one input strip created from the triangles
+					in_strip = stripify(tmd_piece_tris, stitchstrips = True)[0]
+					pos = 1
+					#then we must split
+					if len(in_strip) > 7500:
+						print("Splitting required!")
+						while pos != len(in_strip)-1:
+							print("Splitting for strip length at pos",pos)
+							start = pos
+							pos += 7500
+							#double check that the indices are correct!
+							#for the last strip only, set a manual end
+							if pos > len(in_strip)-1:
+								pos = len(in_strip)-1
+							piece_data.append((in_strip[start-1:pos], bones_pieces[piece_i]))
+					# no need to split again, it is short enough
+					else:
+						piece_data.append((in_strip, bones_pieces[piece_i]))
+					print("current mesh_vertices",len(mesh_vertices))
 			
-			tristrips = stripify(mesh_triangles, stitchstrips = True)
-			print(ob.name)
+			num_pieces = len(piece_data)
+			num_all_strip_indices = sum([len(strip) for strip, piece_bone_names in piece_data])
+			num_all_verts = len(mesh_vertices)
 			
-			matname = me.materials[0].name
-			
-			#there is just one strip
-			in_strip = tristrips[0]
-			
-			strips_split = []
-			pos = 1
-			#then we must split
-			if len(in_strip) > 7500:
-				while pos != len(in_strip)-1:
-					start = pos
-					pos += 7500
-					if pos > len(in_strip)-1:
-						pos = len(in_strip)-1
-					strips_split.append(in_strip[start-1:pos])
-			else:
-				strips_split = tristrips
-			
-			num_pieces = len(strips_split)
-			num_all_strip_indices = sum([len(strip) for strip in strips_split])
-			num_all_verts = len(dummy_vertices)
-			del dummy_vertices
+			print("\nWriting mesh",ob.name)
 			print("num_pieces",num_pieces)
 			print("num_all_strip_indices",num_all_strip_indices)
 			print("num_all_verts",num_all_verts)
-			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, matname.encode("utf-8")))
-			
-			
-			all_vert_indices = []
-			for strip in strips_split:
-				#these are used for two things: keep track of what was added, and get num  in this piece
-				piece_vert_indices = []
+			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, me.materials[0].name.encode("utf-8")))
+			for piece_i in range(0, len(piece_data)):
+				
+				strip, piece_bone_names = piece_data[piece_i]
+				print("\nWriting piece",piece_i)
+				print("len strip:", len(strip))
+				print("num bones:", len(piece_bone_names))
 				
 				#note that these are for the whole object and not the piece - might have to be adjusted
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
 				bbe_x, bbe_y, bbe_z = ob.dimensions
-				
-				vert_bytes = []
-				piece_bone_names = []
-				
-				
-				#so, this code should
-				#create the list of bones referred by this piece's tri strip
-				#see which verts are referred by this tri strip
-				
-				#this spreads the verts & weights over the pieces, but it messes up the tris and weights
-				#for i in sorted(strip):
-				
-				#current solution is a bit inefficient, a bone is added to a piece regardless if it is used in the piece.
-				
-				#now write this piece's vertices
-				for i in range(0, num_all_verts):
-				
-					#is it referenced in this piece
-					vert, w_s, b_uv = verts[i]
-					#index the bone names, and build the list of bones used in this piece's strip
-					b = []
-					w = []
-					for bone_name, weight in w_s:
-						if bone_name:
-							if bone_name not in piece_bone_names:
-								#if len(piece_bone_names) = 28: new piece
-								piece_bone_names.append(bone_name)
-							b.append( int(piece_bone_names.index(bone_name) * 3) )
-						else:
-							b.append( 0 )
-						w.append( int(weight * 255) )
-					if i not in piece_vert_indices and i not in all_vert_indices:
-						piece_vert_indices.append(i)
-						vert_bytes.append(b"".join((vert, pack("4B 4B", *w, *b ), b_uv)))
-				
-				print("num_piece_bones",len(piece_bone_names))
-				if len(piece_bone_names) > 28:
-					log_error("More than 28 bones are used in a mesh piece!")
-					return errors
-					
-				all_vert_indices.extend(piece_vert_indices)
+			
+				#just dump all verts into the first piece
+				piece_verts = []
+				if piece_i == 0:
+					piece_verts = mesh_vertices
 				
 				#write the mesh_piece header
-				lod_bytes.append(pack("4I 3f 3f", len(strip), len(piece_vert_indices), len(piece_bone_names), max(strip), bbc_x, bbc_y, bbc_z, bbe_x, bbe_y, bbe_z))
+				lod_bytes.append(pack("4I 3f 3f", len(strip), len(piece_verts), len(piece_bone_names), max(strip), bbc_x, bbc_y, bbc_z, bbe_x, bbe_y, bbe_z))
 				
 				#write the piece_bones
 				lod_bytes.append(pack(str(len(piece_bone_names))+"I", *[bone_names.index(bone_name) for bone_name in piece_bone_names]))
 				
 				#write the verts
-				lod_bytes.append(b"".join(vert_bytes))
+				lod_bytes.append(b"".join(piece_verts))
 				
 				#write the whole tristrip
 				lod_bytes.append(pack(str(len(strip))+"h", *strip))
-	
+		
 	lod_bytes = b"".join(lod_bytes)
 	
 	f = open(filepath, 'wb')
