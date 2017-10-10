@@ -75,18 +75,16 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	
 	if not export_anims:
 		#do two things
-		#just copy the anim block from the imported file
+		#just copy the anim_bytes block from the imported file
 		#and set the bone names list into the correct order
 		tmd_path = vars["tmd_path"]
 		print("Copying anims from",tmd_path)
 		f = open(tmd_path, 'rb')
-		datastream = f.read()
-		f.close()
-		#header
-		remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", datastream, 8)
+		header = f.read(130)
+		remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
 		tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
-		scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", datastream, 60)
-		aux_node_data, node_data, anim_pointer = unpack_from("3I", datastream, 60+56)
+		scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
+		aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
 		#decrypt the addresses
 		aux_node_data += 60 - salt
 		node_data += 60 - salt
@@ -94,16 +92,21 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		if aux_node_data == 124:
 			anim_pointer = node_data
 			node_data = aux_node_data
-		anim_bytes = datastream[ anim_pointer : lod_data_offset + 60]
-			
-		pos = node_data
+		
+		f.seek(anim_pointer)	
+		anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
+		
+		f.seek(node_data)
+		node_bytes = f.read(176 * num_nodes)
+		pos = 0
 		#note that these are not necessarily sorted, so we must build a list manually and can't just take the bones from the armature in the end!
 		bone_names = []
 		for i in range(0, num_nodes):
-			name_len =  unpack_from("B", datastream, pos+144)[0]
-			bone_name = unpack_from(str(name_len)+"s", datastream, pos+145)[0].rstrip(b"\x00").decode("utf-8")
+			name_len =  unpack_from("B", node_bytes, pos+144)[0]
+			bone_name = unpack_from(str(name_len)+"s", node_bytes, pos+145)[0].rstrip(b"\x00").decode("utf-8")
 			bone_names.append(bone_name)
 			pos+=176
+		f.close()
 	else:
 		#we can ignore the existing TMD / TKL  bone ordering and just take the bones as sorted in the armature!
 		bone_names = armature.data.bones.keys()
@@ -268,13 +271,16 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		f.close()
 		
 
-	
 	lod_bytes = []
 	lods = []
 	for i in range(0,10):
 		lod = [ob for ob in bpy.data.objects if "_LOD"+str(i) in ob.name]
 		if lod: lods.append(lod)
 		else: break
+	if not lods:
+		log_error("Could not find any LODs! Follow the naming convention of imported TMDs!")
+		return errors
+		
 	#max_lod_distance just a guess but sound
 	#max_lod_distance 34.92011260986328
 	#0.0 2.0976476669311523 -1.001983642578125 3.7165191173553467 30.53643798828125
@@ -293,9 +299,18 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		f3 = 0.9 * max_lod_distance
 		lod_bytes.append(pack('I f 4f ',len(lod), 0, f0, f1, f2, f3))
 		for ob in lod:
-			print("Processing mesh of",ob.name)
-			#these are the meshes
-			me = ob.data
+			print("\nProcessing mesh of",ob.name)
+			
+			#remove unneeded modifiers
+			for mod in ob.modifiers:
+				if mod.type in ('ARMATURE','TRIANGULATE'):
+					ob.modifiers.remove(mod)
+			ob.modifiers.new('Triangulate', 'TRIANGULATE')
+			#make a copy with all modifiers applied - I think there was another way to do it too
+			me = ob.to_mesh(bpy.context.scene, True, "PREVIEW", calc_tessface=True, calc_undeformed=False)
+			#and restore the armature modifier
+			mod = ob.modifiers.new('SkinDeform', 'ARMATURE')
+			mod.object = armature
 			
 			#initialize the piece lists
 			max_pieces = 4
@@ -305,7 +320,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				bones_pieces.append([])
 				tris_pieces.append([])
 				
-			print("First Splitting")
+			print("Splitting into pieces of <= 28 bones")
 			#first step:
 			#go over all triangles, see which bones their verts use, see which tri goes into which piece
 			for polygon in me.polygons:
@@ -342,16 +357,16 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					
 					#ok, done, skip the other pieces because the tri is already added
 					break
-			mesh_verts = []
-			uv_layer = me.uv_layers[0]
+			
+			uv_layer = me.uv_layers[0].data
 			piece_data = []
 			mesh_vertices = []
 			#do the second splitting
 			for piece_i in range(0, max_pieces):
 				if bones_pieces[piece_i]:
 					print("\nProcessing temp piece", piece_i)
-					print("temp num tris:", len(tris_pieces[piece_i]))
-					print("temp num bones:", len(bones_pieces[piece_i]))
+					print("temp tris:", len(tris_pieces[piece_i]))
+					print("temp bones:", len(bones_pieces[piece_i]))
 					
 					#at this point we have the tris in the right pieces, so all verts that are used in piece 0 will exist for piece 1 (incase we want to reuse them)
 					tmd_piece_tris = []
@@ -385,8 +400,10 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 								else:
 									b.append( 0 )
 								w.append( int(weight * 255) )
-															
-							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer.data[loop_index].uv.x, -uv_layer.data[loop_index].uv.y )
+							
+							#the final vert
+							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
+							#we could probably spread them out by pieces, but it doesn't seem to be required
 							if vert not in mesh_vertices:
 								mesh_vertices.append(vert)
 							
@@ -398,12 +415,13 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					pos = 1
 					#then we must split
 					if len(in_strip) > 7500:
-						print("Splitting required!")
+						print("Splitting due to triangle strip length required!")
 						while pos != len(in_strip)-1:
-							print("Splitting for strip length at pos",pos)
+							print("Split strip at pos",pos)
 							start = pos
 							pos += 7500
 							#double check that the indices are correct!
+							#it appears they are incorrect - some faces are missing, others might be normal-swapped
 							#for the last strip only, set a manual end
 							if pos > len(in_strip)-1:
 								pos = len(in_strip)-1
@@ -411,23 +429,19 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					# no need to split again, it is short enough
 					else:
 						piece_data.append((in_strip, bones_pieces[piece_i]))
-					print("current mesh_vertices",len(mesh_vertices))
 			
 			num_pieces = len(piece_data)
 			num_all_strip_indices = sum([len(strip) for strip, piece_bone_names in piece_data])
 			num_all_verts = len(mesh_vertices)
 			
 			print("\nWriting mesh",ob.name)
-			print("num_pieces",num_pieces)
-			print("num_all_strip_indices",num_all_strip_indices)
-			print("num_all_verts",num_all_verts)
+			print("pieces:",num_pieces)
+			print("all_strip_entries:",num_all_strip_indices)
+			print("all_verts:",num_all_verts)
 			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, me.materials[0].name.encode("utf-8")))
 			for piece_i in range(0, len(piece_data)):
 				
 				strip, piece_bone_names = piece_data[piece_i]
-				print("\nWriting piece",piece_i)
-				print("len strip:", len(strip))
-				print("num bones:", len(piece_bone_names))
 				
 				#note that these are for the whole object and not the piece - might have to be adjusted
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
@@ -437,6 +451,11 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				piece_verts = []
 				if piece_i == 0:
 					piece_verts = mesh_vertices
+				
+				print("\nWriting piece",piece_i)
+				print("strip_entries:", len(strip))
+				print("piece_bones:", len(piece_bone_names))
+				print("piece_verts:", len(piece_verts))
 				
 				#write the mesh_piece header
 				lod_bytes.append(pack("4I 3f 3f", len(strip), len(piece_verts), len(piece_bone_names), max(strip), bbc_x, bbc_y, bbc_z, bbe_x, bbe_y, bbe_z))
