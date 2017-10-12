@@ -383,23 +383,25 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 								bone_weight = vertex_group.weight
 								#should this vertex group be used?
 								if bone_weight > 0 and bone_name in bone_names:
-									w.append((bone_name, bone_weight))
+									w.append((int(bones_pieces[piece_i].index(bone_name) * 3), bone_weight))
 
+							#could also check len(w_s)
+							if not w:
+								log_error("Weight painting error, at least one vertex is not weighted!")
+								return errors
+								
 							#only use the 4 biggest keys
 							w_s = sorted(w, key = lambda x:x[1], reverse = True)[0:4]
 							
+							#for normalization
+							w_sum = sum([weight for id, weight in w_s])
+							
 							#pad the weight list to 4 bones, ie. add empty bones if missing
 							for i in range(0, 4-len(w_s)): w_s.append((0,0))
-
+							
 							#index the bone names, and build the list of bones used in this piece's strip
-							b = []
-							w = []
-							for bone_name, weight in w_s:
-								if bone_name:
-									b.append( int(bones_pieces[piece_i].index(bone_name) * 3) )
-								else:
-									b.append( 0 )
-								w.append( int(weight * 255) )
+							b = [id for id, weight in w_s]
+							w = [int(weight / w_sum * 255) for id, weight in w_s]
 							
 							#the final vert
 							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
@@ -482,8 +484,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	#main_data = 
 	f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 	f.close()
-	return errors
 
-	success = '\nFinished TMD Import in %.2f seconds\n' %(time.clock()-starttime)
+	success = '\nFinished TMD Export in %.2f seconds\n' %(time.clock()-starttime)
 	print(success)
 	return errors

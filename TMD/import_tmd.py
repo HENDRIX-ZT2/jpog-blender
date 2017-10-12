@@ -464,19 +464,28 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		
 	try:
 		for matname in mat_2_obj.keys():
+					
 			print("Material:",matname)
-			#material
+			#create or retrieve a material
 			if matname not in bpy.data.materials:
 				mat = bpy.data.materials.new(matname)
 				mat.specular_intensity = 0.0
 				mat.ambient = 1
 				mat.use_transparency = True
-
 			else:
 				mat = bpy.data.materials[matname]
+				
+			#even if no TMLs were found, we still get a dummy material (for re-export!)
+			for ob in mat_2_obj[matname]:
+				me = ob.data
+				#needed?
+				if not me.materials:
+					me.materials.append(mat)
+				else:
+					me.materials[0] = mat
+			
 			#find the image file candidates
 			textures = [file for file in os.listdir(matlibs) if file.lower() == matname.lower()+".tga"]
-			print(textures)
 			#print(textures)
 			#do something better?
 			if textures:
@@ -500,13 +509,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				mtex.emission_color_factor = 0.5
 				mtex.uv_layer = "UV"
 				
+				#assign textures to mesh
 				for ob in mat_2_obj[matname]:
 					me = ob.data
-					#needed?
-					if not me.materials:
-						me.materials.append(mat)
-					else:
-						me.materials[0] = mat
 					
 					#reversed so the last is shown
 					for mtex in reversed(mat.texture_slots):
@@ -516,7 +521,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 					#and for rendering, make sure each poly is assigned to the material
 					for f in me.polygons:
 						f.material_index = 0
-				#break
 	except:
 		log_error('Material creation failed!')
 	
