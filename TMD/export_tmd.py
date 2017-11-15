@@ -25,22 +25,17 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	errors = []
 
 	text_name = "JPOG.txt"
-	if text_name in bpy.data.texts:
-		text_ob = bpy.data.texts[text_name]
-	else:
+	if text_name not in bpy.data.texts:
 		log_error("You must import a TMD file before you can export one!")
 		return errors
 	
 	#get the vars
-	#text_ob = get_text()
+	text_ob = bpy.data.texts[text_name]
 	#yes bad but I am lazy
 	vars = eval(text_ob.as_string())
-	#print(vars)
-	
 	
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
-	
 	
 	for armature in bpy.data.objects:
 		if type(armature.data) == bpy.types.Armature:
@@ -53,8 +48,10 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	#magic_value1 2316361
 	#magic_value2 136
 	#more common
-	magic_value1 = 3299401
-	magic_value2 = 1960
+	#magic_value1 = 3299401
+	#magic_value2 = 1960
+	magic_value1 = vars["magic_value1"]
+	magic_value2 = vars["magic_value2"]
 	salt = vars["salt"]
 	u1 = vars["u1"]
 	u2 = vars["u2"]
@@ -112,7 +109,12 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		bone_names = armature.data.bones.keys()
 	
 	for bone_name in bone_names:
-		bone = armature.data.bones[bone_name]
+		try:
+			bone = armature.data.bones[bone_name]
+		except:
+			#skip this bone
+			log_error("Bone "+bone_name+" is missing from the armature, but was expected to be there as the original model contained it.")
+			continue
 		#for the export, we get the original bind like this
 		bind = correction_global.inverted() *  correction_local.inverted() * bone.matrix_local *  correction_local
 		mat_local = bind
@@ -270,7 +272,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
 		f.close()
 		
-
+	#find all models
 	lod_bytes = []
 	lods = []
 	for i in range(0,10):
@@ -280,13 +282,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	if not lods:
 		log_error("Could not find any LODs! Follow the naming convention of imported TMDs!")
 		return errors
-		
-	#max_lod_distance just a guess but sound
-	#max_lod_distance 34.92011260986328
-	#0.0 2.0976476669311523 -1.001983642578125 3.7165191173553467 30.53643798828125
-	#max_lod_distance 6.398754596710205
-	#0.0 0.26798370480537415 -0.06812041997909546 -0.0847543329000473 6.109550476074219
-	#0 5% -2% 10% 90%
+	
 	max_lod_distance = 2 * max(max(ob.dimensions) for ob in bpy.data.objects)
 	lod_bytes.append(pack('I f', len(lods), max_lod_distance))
 	for lod in lods:

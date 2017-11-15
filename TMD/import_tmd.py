@@ -84,7 +84,7 @@ def mat3_to_vec_roll(mat):
 	roll = math.atan2(rollmat[0][2], rollmat[2][2])
 	return vec, roll
 			
-def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False):
+def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False, extract_textures=False):
 
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
@@ -124,6 +124,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	vars["u2"] = u2
 	vars["u3"] = u3
 	vars["u4"] = u4
+	vars["magic_value1"] = magic_value1
+	vars["magic_value2"] = magic_value2
 	
 	#print(aux_node_data, node_data, anim_pointer)
 	#decrypt the addresses
@@ -196,9 +198,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				childheads = mathutils.Vector()
 				for child in bone.children:
 					childheads += child.head
-				bone.length = (bone.head - childheads/len(bone.children)).length
-				if bone.length < 0.01:
-					bone.length = 0.25
+				#do it like this to avoid deleting zero-length bones inbetween!
+				bone_length = (bone.head - childheads/len(bone.children)).length
+				if bone_length < 0.01:
+					bone_length = 0.25
+				bone.length = bone_length
 			# end of a chain
 			else:
 				bone.length = bone.parent.length
@@ -409,58 +413,59 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			
 	#find the right material
 	#create material and texture if they don't already exist
-	try:
-		matlibs = os.path.join(os.path.dirname(os.path.dirname(filepath)), "matlibs")
-		if not os.path.isdir(matlibs):
-			log_error('/matlibs folder missing. Models should be imported from JPOG-like folder structure.')
-			matlibs = os.path.dirname(filepath)
-		tmls = [file for file in os.listdir(matlibs) if file.lower().endswith(".tml")]
-		for tml in tmls:
-			tml_path = os.path.join(matlibs, tml)
-			with open(tml_path, 'rb') as f:
-				#read the last 2048 bytes
-				try:
-					f.seek(-2048,2)
-				#select few seem to be shorter, maybe we can skip the exception
-				except:
-					print("TOO SHORT",tml_path)
-					f.seek(0)
-				datastream = f.read()
-				# see if the matname is in it
-				for matname in mat_2_obj.keys():
-					#print((matname,))
-					if any((b"\x00"+matname.encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.title().encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.lower().encode('utf-8')+b"\x00" in datastream)):
-						#print(matname,os.path.basename(tml_path))
-					
-						# #now read it properly
-						# f.seek(0)
-						# #header
-						# u6, num_textures = unpack_from("2I", datastream, 4)
-						# pos = 12
-						# print("Number of Textures:",num_textures)
-						# for texture in range(0, num_textures):
-							# tex_id, data_size, b00, b01, b02, b03, b04, b05, b06, b07, tex_format, width, height, b8, b9, b10, b11, b12, b13 = unpack_from("2I 8B 3H 6B", datastream, pos)
-							# #print(data_size, tex_format)
-							# pos+=data_size+28
-						# num_materials = unpack_from("I", datastream, pos)[0]
-						# mat_lut = list(iter_unpack("32s", datastream[pos+4 : pos+4+32*num_materials]))
-						# pos += 4+32*num_materials
-						# print("mat_lut:",mat_lut)
-						# for material in range(0, num_materials):
-							# lut_index, u7, num_mat_textures = unpack_from("I 2H", datastream, pos)
-							# #unknown tends to be 2 or 3
-							# print(lut_index, u7, num_mat_textures)
-							# #matname = mat_lut[lut_index]
-							# #indices into the list of textures, which should probably be built or stored in a dict
-							# used_textures =  unpack_from(str(num_mat_textures)+"I", datastream, pos+8)
-							# pos += 8 + 4* num_mat_textures
-							
-						#extract all to bmp
-						check_call(os.path.join(os.path.dirname(__file__), 'ConvertTML.exe "'+tml_path+'"'))
-						#we only have to unpack this once
-						break
-	except:
-		log_error('TML reading failed! Could not extract textures.')
+	matlibs = os.path.join(os.path.dirname(os.path.dirname(filepath)), "matlibs")
+	if not os.path.isdir(matlibs):
+		log_error('/matlibs folder missing. Models should be imported from JPOG-like folder structure.')
+		matlibs = os.path.dirname(filepath)
+	if extract_textures:
+		try:
+			tmls = [file for file in os.listdir(matlibs) if file.lower().endswith(".tml")]
+			for tml in tmls:
+				tml_path = os.path.join(matlibs, tml)
+				with open(tml_path, 'rb') as f:
+					#read the last 2048 bytes
+					try:
+						f.seek(-2048,2)
+					#select few seem to be shorter, maybe we can skip the exception
+					except:
+						print("TOO SHORT",tml_path)
+						f.seek(0)
+					datastream = f.read()
+					# see if the matname is in it
+					for matname in mat_2_obj.keys():
+						#print((matname,))
+						if any((b"\x00"+matname.encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.title().encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.lower().encode('utf-8')+b"\x00" in datastream)):
+							#print(matname,os.path.basename(tml_path))
+						
+							# #now read it properly
+							# f.seek(0)
+							# #header
+							# u6, num_textures = unpack_from("2I", datastream, 4)
+							# pos = 12
+							# print("Number of Textures:",num_textures)
+							# for texture in range(0, num_textures):
+								# tex_id, data_size, b00, b01, b02, b03, b04, b05, b06, b07, tex_format, width, height, b8, b9, b10, b11, b12, b13 = unpack_from("2I 8B 3H 6B", datastream, pos)
+								# #print(data_size, tex_format)
+								# pos+=data_size+28
+							# num_materials = unpack_from("I", datastream, pos)[0]
+							# mat_lut = list(iter_unpack("32s", datastream[pos+4 : pos+4+32*num_materials]))
+							# pos += 4+32*num_materials
+							# print("mat_lut:",mat_lut)
+							# for material in range(0, num_materials):
+								# lut_index, u7, num_mat_textures = unpack_from("I 2H", datastream, pos)
+								# #unknown tends to be 2 or 3
+								# print(lut_index, u7, num_mat_textures)
+								# #matname = mat_lut[lut_index]
+								# #indices into the list of textures, which should probably be built or stored in a dict
+								# used_textures =  unpack_from(str(num_mat_textures)+"I", datastream, pos+8)
+								# pos += 8 + 4* num_mat_textures
+								
+							#extract all to bmp
+							check_call(os.path.join(os.path.dirname(__file__), 'ConvertTML.exe "'+tml_path+'"'))
+							#we only have to unpack this once
+							break
+		except:
+			log_error('TML reading failed! Could not extract textures.')
 		
 	try:
 		for matname in mat_2_obj.keys():
