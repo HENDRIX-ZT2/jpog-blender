@@ -358,15 +358,15 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			piece_data = []
 			mesh_vertices = []
 			#do the second splitting
-			for piece_i in range(0, max_pieces):
-				if bones_pieces[piece_i]:
-					print("\nProcessing temp piece", piece_i)
-					print("temp tris:", len(tris_pieces[piece_i]))
-					print("temp bones:", len(bones_pieces[piece_i]))
+			for temp_piece_i in range(0, max_pieces):
+				if bones_pieces[temp_piece_i]:
+					print("\nProcessing temp piece", temp_piece_i)
+					print("temp tris:", len(tris_pieces[temp_piece_i]))
+					print("temp bones:", len(bones_pieces[temp_piece_i]))
 					
 					#at this point we have the tris in the right pieces, so all verts that are used in piece 0 will exist for piece 1 (incase we want to reuse them)
 					tmd_piece_tris = []
-					for tri in tris_pieces[piece_i]:
+					for tri in tris_pieces[temp_piece_i]:
 						tmd_tri=[]
 						for loop_index in tri:
 							vertex = me.vertices[me.loops[loop_index].vertex_index]
@@ -379,7 +379,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 								bone_weight = vertex_group.weight
 								#should this vertex group be used?
 								if bone_weight > 0 and bone_name in bone_names:
-									w.append((int(bones_pieces[piece_i].index(bone_name) * 3), bone_weight))
+									w.append((int(bones_pieces[temp_piece_i].index(bone_name) * 3), bone_weight))
 
 							#could also check len(w_s)
 							if not w:
@@ -410,24 +410,13 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 						tmd_piece_tris.append(tmd_tri)
 					#there is just one input strip created from the triangles
 					in_strip = stripify(tmd_piece_tris, stitchstrips = True)[0]
-					pos = 1
+					
 					#then we must split
-					if len(in_strip) > 7500:
-						print("Splitting due to triangle strip length required!")
-						while pos != len(in_strip)-1:
-							print("Split strip at pos",pos)
-							start = pos
-							pos += 7500
-							#double check that the indices are correct!
-							#it appears they are incorrect - some faces are missing, others might be normal-swapped
-							#for the last strip only, set a manual end
-							if pos > len(in_strip)-1:
-								pos = len(in_strip)-1
-							piece_data.append((in_strip[start-1:pos], bones_pieces[piece_i]))
-					# no need to split again, it is short enough
-					else:
-						piece_data.append((in_strip, bones_pieces[piece_i]))
-			
+					piece_len = 7500
+					overlap = 2
+					for n in range(0, len(in_strip), piece_len):
+						piece_data.append((in_strip[n : piece_len+n+overlap], bones_pieces[temp_piece_i]))
+						
 			num_pieces = len(piece_data)
 			num_all_strip_indices = sum([len(strip) for strip, piece_bone_names in piece_data])
 			num_all_verts = len(mesh_vertices)
