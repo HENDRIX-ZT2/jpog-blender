@@ -22,6 +22,32 @@ from bpy_extras.object_utils import AddObjectHelper, object_data_add
 import bpy.utils.previews
 preview_collection = bpy.utils.previews.new()
 
+class ApplyScaleToObAndAnims(bpy.types.Operator):
+	"""Apply Scale to Objects and Animations."""
+	bl_idname = "object.apply_scale_ob_anims"
+	bl_label = "Apply Scale to Objects and Animations"
+	bl_options = {'REGISTER', 'UNDO'}
+	# fixed_items = bpy.props.EnumProperty(items= (('0', 'Height', 'Use height coordinate of the mesh.'),
+												 # ('1', 'Mesh Center Radius', 'Use distance to the mesh center.'),
+												 # ('2', 'Object Origin Radius', 'Use distance to the mesh origin.'),
+												 # ('3', 'Z Axis Distance', 'Use distance to the Z axis.')),
+												 # name = "Wind source")      
+	# wmin = FloatProperty(
+			# name="Minimal weight",
+			# description="Minimal weight used in the gradient",
+			# min=0.0, max=1.0,
+			# default=0.0, )
+	# wmax = FloatProperty(
+			# name="Maximal weight",
+			# description="Maximal weight used in the gradient",
+			# min=0.001, max=1.0,
+			# default=0.5, )
+			
+	def execute(self, context):
+		from . import apply_scale_ob_anims
+		apply_scale_ob_anims.run()
+		return {'FINISHED'}
+	
 class ImportTMD(bpy.types.Operator, ImportHelper):
 	"""Import from TMD file format (.TMD)"""
 	bl_idname = "import_scene.toshi_tmd"
@@ -30,7 +56,8 @@ class ImportTMD(bpy.types.Operator, ImportHelper):
 	filename_ext = ".TMD"
 	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	use_custom_normals = BoolProperty(name="Use TMD Normals", description="Preserves the original shading of a TMD.", default=False)
-	use_anims = BoolProperty(name="Import Anims", description="If anims are imported, the skeleton looks ugly. If this is disabled, you get a clean skeleton.", default=True)
+	use_anims = BoolProperty(name="Import Anims", description="If checked, all animations will be imported.", default=True)
+	extract_textures = BoolProperty(name="Extract TMLs", description="Unpack textures from TML files.", default=True)
 	#mirror_mesh = BoolProperty(name="Mirror Rigged Meshes", description="Mirrors models with a skeleton. Careful, sometimes bones don't match!", default=True)
 	def execute(self, context):
 		from . import import_tmd
@@ -48,6 +75,7 @@ class ExportTMD(bpy.types.Operator, ExportHelper):
 	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	export_anims = BoolProperty(name="Export Anims", description="If checked, animations are exported from blender. If not, keyframes are copied from the imported TMD and no TKL is created.", default=False)
 	append_anims = BoolProperty(name="Append Anims", description="If checked, the original keyframes are included in the exported TKL file. If not, only the keyframes from blender are written.", default=False)
+	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL.", default=False)
 	# author_name = StringProperty(name="Author", description="A signature included in the TMD file.", default=author)
 	# create_lods = BoolProperty(name="Create LODs", description="Adds Levels of Detail - overwrites existing LODs!", default=True)
 	# numlods = IntProperty(	name="Number of LODs",
@@ -73,6 +101,9 @@ def menu_func_export(self, context):
 def menu_func_import(self, context):
 	self.layout.operator(ImportTMD.bl_idname, text="Toshi Model (.tmd)", icon_value=preview_collection["jpog.png"].icon_id)
 
+def menu_func_obj(self, context):
+	self.layout.operator(ApplyScaleToObAndAnims.bl_idname, icon_value=preview_collection["jpog.png"].icon_id)
+	
 def register():
 	import os
 	icons_dir = os.path.join(os.path.dirname(__file__), "icons")
@@ -83,6 +114,7 @@ def register():
 	
 	bpy.types.INFO_MT_file_import.append(menu_func_import)
 	bpy.types.INFO_MT_file_export.append(menu_func_export)
+	bpy.types.VIEW3D_PT_tools_object.append(menu_func_obj)
 	
 def unregister():
 	bpy.utils.previews.remove(preview_collection)
@@ -91,6 +123,7 @@ def unregister():
 
 	bpy.types.INFO_MT_file_import.remove(menu_func_import)
 	bpy.types.INFO_MT_file_export.remove(menu_func_export)
+	bpy.types.VIEW3D_PT_tools_object.remove(menu_func_obj)
 
 if __name__ == "__main__":
 	register()

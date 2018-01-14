@@ -109,9 +109,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	try: bpy.ops.object.mode_set(mode='OBJECT')
 	except: pass
 	print("\nImporting",os.path.basename(filepath))
-	f = open(filepath, 'rb')
-	datastream = f.read()
-	f.close()
+	with open(filepath, 'rb') as f:
+		datastream = f.read()
 	
 	#header
 	remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2	 = unpack_from("I 8s 2L 4I", datastream, 8)
@@ -190,6 +189,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		bone.head = bind.to_translation()
 		bone.tail = tail + bone.head
 		bone.roll = roll
+		bone.use_deform = False if updates else True
 	
 	# #fix the bone length
 	for bone in armData.edit_bones:
@@ -335,15 +335,15 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	if use_anims:
 		#read the tkl
 		print("\nReading",tkl_path)
-		f = open(tkl_path, 'rb')
-		tklstream = f.read()
-		f.close()
+		with open(tkl_path, 'rb') as f:
+			tklstream = f.read()
 		
 		loc_lut = {}
 		rot_lut = {}
 		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
 		#tkl_i04 probably another size value, close to tkl_remaining_bytes
 		pos = 56
+		print("Num Keys:",num_loc,num_rot)
 		for i in range(0, num_loc):
 			loc_lut[i] = mathutils.Vector((unpack_from("3f", tklstream, pos)))
 			pos+=12
@@ -365,7 +365,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			ub1, ub2, num_groups, duration =  unpack_from("3I f", datastream, pos+16)
 			channel_offsets = unpack_from(str(num_nodes)+"I", datastream, pos+32)
 			#create the action
-			action = bpy.data.actions.new(name = anim_name)
+			action = bpy.data.actions.new(name = anim_name+str(ub1)+str(ub2))
 			action.use_fake_user = True
 			armature.animation_data.action = action
 			#read all bone channels

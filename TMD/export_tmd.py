@@ -6,6 +6,7 @@ import mathutils
 from struct import pack, unpack_from
 #from subprocess import check_call
 from .utils.tristrip import stripify
+#import random
 
 def export_matrix(mat):
 	bytes = b''
@@ -17,7 +18,7 @@ def log_error(error):
 	global errors
 	errors.append(error)
 			
-def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, export_anims = False, create_lods = False, append_anims = False, numlods = 1, rate = 1):
+def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, export_anims = False, create_lods = False, append_anims = False, pad_anims = False, numlods = 1, rate = 1):
 
 	print("\nStarting export to",filepath)
 	starttime = time.clock()
@@ -69,45 +70,46 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	bones_bytes = []
 	fallback_matrix = {}
 	
-	
+	#read the original TMD: do two things at max
+	#set the bone names list into the original order
+	#just copy the anim_bytes block from the imported file
 	if not export_anims:
-		#do two things
-		#just copy the anim_bytes block from the imported file
-		#and set the bone names list into the correct order
 		tmd_path = vars["tmd_path"]
 		print("Copying anims from",tmd_path)
-		f = open(tmd_path, 'rb')
-		header = f.read(130)
-		remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
-		tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
-		scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
-		aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
-		#decrypt the addresses
-		aux_node_data += 60 - salt
-		node_data += 60 - salt
-		anim_pointer += 60 - salt
-		if aux_node_data == 124:
-			anim_pointer = node_data
-			node_data = aux_node_data
+		with open(tmd_path, 'rb') as f:
+			header = f.read(130)
+			remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
+			tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
+			scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
+			aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
+			#decrypt the addresses
+			aux_node_data += 60 - salt
+			node_data += 60 - salt
+			anim_pointer += 60 - salt
+			if aux_node_data == 124:
+				anim_pointer = node_data
+				node_data = aux_node_data
+			
+			f.seek(anim_pointer)	
+			anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
 		
-		f.seek(anim_pointer)	
-		anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
-		
-		f.seek(node_data)
-		node_bytes = f.read(176 * num_nodes)
-		pos = 0
-		#note that these are not necessarily sorted, so we must build a list manually and can't just take the bones from the armature in the end!
-		bone_names = []
-		for i in range(0, num_nodes):
-			name_len =  unpack_from("B", node_bytes, pos+144)[0]
-			bone_name = unpack_from(str(name_len)+"s", node_bytes, pos+145)[0].rstrip(b"\x00").decode("utf-8")
-			bone_names.append(bone_name)
-			pos+=176
-		f.close()
+			f.seek(node_data)
+			node_bytes = f.read(176 * num_nodes)
+			pos = 0
+			#note that these are not necessarily sorted, so we must build a list manually and can't just take the bones from the armature in the end!
+			bone_names = []
+			for i in range(0, num_nodes):
+				name_len =  unpack_from("B", node_bytes, pos+144)[0]
+				bone_name = unpack_from(str(name_len)+"s", node_bytes, pos+145)[0].rstrip(b"\x00").decode("utf-8")
+				bone_names.append(bone_name)
+				pos+=176
+
 	else:
-		#we can ignore the existing TMD / TKL  bone ordering and just take the bones as sorted in the armature!
-		bone_names = armature.data.bones.keys()
-	
+		# create a new sorting from blender bones, updated bones before non-updated bones.
+		b_bones = armature.data.bones.keys()
+		bone_names = [b for b in b_bones if armature.data.bones[b].use_deform] + [b for b in b_bones if not armature.data.bones[b].use_deform]
+
+	#export all bones in the correct order
 	for bone_name in bone_names:
 		try:
 			bone = armature.data.bones[bone_name]
@@ -118,8 +120,8 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		#for the export, we get the original bind like this
 		bind = correction_global.inverted() *  correction_local.inverted() * bone.matrix_local *  correction_local
 		mat_local = bind
-		#only Acro node is 1, ie. gets no updates. just set all to 0 for now
-		updates = 0
+		#only non-skeletal nodes can ignore updates
+		updates = 0 if bone.use_deform else 1
 		parent_id = -1
 		if bone.parent:
 			parent_id = bone_names.index(bone.parent.name)
@@ -130,27 +132,30 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		q = mat_local.to_quaternion()
 		l = mat_local.to_translation()
 		#note that on import, the bind is transposed right after reading, so here we do it in the very end 
-		bones_bytes.append( b"".join((pack('4f', q.x, q.y, q.z, q.w), export_matrix(bind.transposed()), export_matrix(bind.inverted().transposed()), pack('B 15s hH 3f', len(bone.name), bone_name.encode("utf-8"), parent_id, updates, l.x, l.y, l.z) )))
+		bones_bytes.append( b"".join((pack('4f', q.x, q.y, q.z, q.w), export_matrix(bind.transposed()), export_matrix(bind.inverted().transposed()), pack('B 15s hH 3f', len(bone.name), bone_name.encode("utf-8"), parent_id, updates, *l) )))
 	
 	bones_bytes = b"".join(bones_bytes)
 	
-	
 	if export_anims:
 	
-		tkl_ref = os.path.basename(filepath[:-4])[:6]
+		#tkl_ref = os.path.basename(filepath[:-4])[:6]
+		
+		#overwrite mode
+		tkl_ref = os.path.basename(vars["tkl_path"][:-4])[:6]
 		print("Going to create",tkl_ref+".tkl")
 		
 		anim_bytes = []
 		channels_bytes = []
 		all_quats = []
 		all_locs = []
-		if append_anims:
-			tkl_path = vars["tkl_path"]
-			print("Loading existing TKL file for appending.")
-			f = open(tkl_path, 'rb')
+		#just get all vars
+		#TODO: only read the header block, or store the vars
+		tkl_path = vars["tkl_path"]
+		with open(tkl_path, 'rb') as f:
 			tklstream = f.read()
-			f.close()
-			tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
+		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
+		if append_anims:
+			print("Loading existing TKL file for appending.")
 			#tkl_i04 probably another size value, close to tkl_remaining_bytes
 			pos = 56
 			for i in range(0, num_loc):
@@ -179,15 +184,18 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			channel_bytes = []
 			
 			#by definition, a secondary anim will have some bones unkeyframed
-			#comparing the len could be quicker but less accurate
-			is_secondary = 0
-			for bone_name in bone_names:
-				if bone_name not in action.groups:
-					is_secondary = 1
-					break
-			#not sure
-			has_sound = 0
-			channel_pointer_bytes.append(pack('B 15s 3I f', len(action.name), action.name.encode("utf-8"), is_secondary, has_sound, len(bone_names), action.frame_range[1]/fps))
+			# ub1 = 0
+			# for bone_name in bone_names:
+				# if bone_name not in action.groups:
+					# ub1 = 1
+					# break
+			# #not sure
+			# ub2 = 0
+			action_name = action.name[:-2]
+			ub1 = int(action.name[-2])
+			ub2 = int(action.name[-1])
+			
+			channel_pointer_bytes.append(pack('B 15s 3I f', len(action_name), action_name.encode("utf-8"), ub1, ub2, len(bone_names), action.frame_range[1]/fps))
 			
 			for bone_name in bone_names:
 				channel_pointer_bytes.append(pack('I', offset - 60 + salt))
@@ -258,19 +266,29 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		print("Final Loc keys:",len(all_locs))
 		print("Final Rot keys:",len(all_quats))	
 		
+		#make a backup of the TKL if there is no backup yet
+		tkl_backup =  vars["tkl_path"][:-4]+"_backup.tkl"
+		if not os.path.isfile(tkl_backup):
+			os.rename(vars["tkl_path"], tkl_backup)
+		
 		#create the TKL file
 		tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref+".tkl")
 		print("\nWriting",tkl_path)
-		f = open(tkl_path, 'wb')
+		
+		#new test
+		if pad_anims:
+			all_locs.extend([all_locs[0] for x in range(num_loc-len(all_locs))])
+			all_quats.extend([all_quats[0] for x in range(num_rot-len(all_quats))])
 		
 		tkl_locs = [pack("3f", *l) for l in all_locs]
 		tkl_quats = [pack("4f", q.x, q.y, q.z, q.w) for q in all_quats]
 		tkl_len_data = len(tkl_locs)*16 + len(tkl_quats)*12
 		#54 or 39- both exist?
-		x = 54
-		tkl_header = pack("4s I I 6s 10B 2I 5I", b"TPKL", 0, tkl_len_data+44, tkl_ref.encode("utf-8"), x, 0, 160, 152, x, 0, 212, 254, 18, 0, len(all_locs), len(all_quats), 0, 12, 16, 4, tkl_len_data)
-		f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
-		f.close()
+		#x = 54
+		#tkl_header = pack("4s I I 6s 10B 2I 5I", b"TPKL", 0, tkl_len_data+44, tkl_ref.encode("utf-8"), x, 0, 160, 152, x, 0, 212, 254, 18, 0, len(all_locs), len(all_quats), 0, 12, 16, 4, tkl_len_data)
+		tkl_header = pack("4s 4B I 6s 10B 2I 5I", b"TPKL", tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_len_data+44, tkl_ref.encode("utf-8"), tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, len(all_locs), len(all_quats), tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_len_data)
+		with open(tkl_path, 'wb') as f:
+			f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
 		
 	#find all models
 	lod_bytes = []
@@ -457,18 +475,21 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				lod_bytes.append(pack(str(len(strip))+"h", *strip))
 		
 	lod_bytes = b"".join(lod_bytes)
-	
-	f = open(filepath, 'wb')
-	remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
-	
-	lod_offset = anim_pointer-60+len(anim_bytes)
-	print("node_data",node_data)
-	print("anim_pointer",anim_pointer)
-	print("lod_offset",lod_offset)
-	header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
-	#main_data = 
-	f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
-	f.close()
+
+	#make a backup of the tmd if there is no backup yet
+	tmd_backup =  vars["tmd_path"][:-4]+"_backup.tmd"
+	if not os.path.isfile(tmd_backup):
+		os.rename(vars["tmd_path"], tmd_backup)
+		
+	with open(filepath, 'wb') as f:
+		remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
+		
+		lod_offset = anim_pointer-60+len(anim_bytes)
+		print("node_data",node_data)
+		print("anim_pointer",anim_pointer)
+		print("lod_offset",lod_offset)
+		header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
+		f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 
 	success = '\nFinished TMD Export in %.2f seconds\n' %(time.clock()-starttime)
 	print(success)
