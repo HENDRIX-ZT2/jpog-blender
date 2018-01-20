@@ -19,7 +19,9 @@ A toolset for blender allowing the import and export of Jurassic Park - Operatio
 - `File` > `Export` > `Toshi Model (.tmd)`. The default settings should be fine. To export new animations, turn on `Export Anims` and `Pad Anims`.
 #### Resizing
 - Warning: Needs animations to be exported for ideal results! It will do _something_ without new animations, but won't be perfect.
-- Select the armature in object mode, scale it to the desired size and press `Apply Scale to Objects and Animations` in the tool shelf.
+- Select the armature in object mode, scale it to the desired size and press `Apply Scale to Objects and Animations` in the tool shelf. Export with animations.
+#### Custom Animations
+- Are theoretically supported, but not tested yet. Edited animations are tested and functional, but under the limitation that _any_ edit of animations breaks the other animals in a dig site. You could replace them with new animals using the new anims. A TKL merger to solve this sort of problems is planned, but not yet started.
 
 ### Known Limitations
 - Animations break other animals using the same TKL file.
