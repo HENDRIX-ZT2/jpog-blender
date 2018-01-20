@@ -293,6 +293,12 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	#find all models
 	lod_bytes = []
 	lods = []
+
+	#ideally
+	#ob.layers = (1 0 0 0 0 0 ...)
+	#ob.layers = (0 1 0 0 0 0 ...)
+	#bad data
+	#ob.layers = (1 1 1 1 1 0 ...)
 	for i in range(0,10):
 		lod = [ob for ob in bpy.data.objects if "_LOD"+str(i) in ob.name]
 		if lod: lods.append(lod)
@@ -477,9 +483,9 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	lod_bytes = b"".join(lod_bytes)
 
 	#make a backup of the tmd if there is no backup yet
-	tmd_backup =  vars["tmd_path"][:-4]+"_backup.tmd"
-	if not os.path.isfile(tmd_backup):
-		os.rename(vars["tmd_path"], tmd_backup)
+	#tmd_backup =  vars["tmd_path"][:-4]+"_backup.tmd"
+	#if not os.path.isfile(tmd_backup):
+	#	os.rename(vars["tmd_path"], tmd_backup)
 		
 	with open(filepath, 'wb') as f:
 		remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)

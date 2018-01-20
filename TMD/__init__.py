@@ -27,21 +27,6 @@ class ApplyScaleToObAndAnims(bpy.types.Operator):
 	bl_idname = "object.apply_scale_ob_anims"
 	bl_label = "Apply Scale to Objects and Animations"
 	bl_options = {'REGISTER', 'UNDO'}
-	# fixed_items = bpy.props.EnumProperty(items= (('0', 'Height', 'Use height coordinate of the mesh.'),
-												 # ('1', 'Mesh Center Radius', 'Use distance to the mesh center.'),
-												 # ('2', 'Object Origin Radius', 'Use distance to the mesh origin.'),
-												 # ('3', 'Z Axis Distance', 'Use distance to the Z axis.')),
-												 # name = "Wind source")      
-	# wmin = FloatProperty(
-			# name="Minimal weight",
-			# description="Minimal weight used in the gradient",
-			# min=0.0, max=1.0,
-			# default=0.0, )
-	# wmax = FloatProperty(
-			# name="Maximal weight",
-			# description="Maximal weight used in the gradient",
-			# min=0.001, max=1.0,
-			# default=0.5, )
 			
 	def execute(self, context):
 		from . import apply_scale_ob_anims
