@@ -328,6 +328,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			ob.modifiers.new('Triangulate', 'TRIANGULATE')
 			#make a copy with all modifiers applied - I think there was another way to do it too
 			me = ob.to_mesh(bpy.context.scene, True, "PREVIEW", calc_tessface=True, calc_undeformed=False)
+			me.calc_normals_split()
 			#and restore the armature modifier
 			mod = ob.modifiers.new('SkinDeform', 'ARMATURE')
 			mod.object = armature
@@ -381,6 +382,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			uv_layer = me.uv_layers[0].data
 			piece_data = []
 			mesh_vertices = []
+			dummy_vertices = []
 			#do the second splitting
 			for temp_piece_i in range(0, max_pieces):
 				if bones_pieces[temp_piece_i]:
@@ -396,6 +398,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 							vertex = me.vertices[me.loops[loop_index].vertex_index]
 							co = vertex.co
 							no = me.loops[loop_index].normal
+							#no = vertex.normal
 							w = []
 							#we can only look up the name here, and index it per piece
 							for vertex_group in vertex.groups:
@@ -425,12 +428,16 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 							
 							#the final vert
 							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
+							dummy = pack('3f 2f', co.x, co.y, co.z, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
 							#we could probably spread them out by pieces, but it doesn't seem to be required
-							if vert not in mesh_vertices:
+							#if vert not in mesh_vertices:
+							if dummy not in dummy_vertices:
+								dummy_vertices.append(dummy)
 								mesh_vertices.append(vert)
 							
 							# #get the corrected index for this tri
-							tmd_tri.append(mesh_vertices.index(vert))
+							#tmd_tri.append(mesh_vertices.index(vert))
+							tmd_tri.append(dummy_vertices.index(dummy))
 						tmd_piece_tris.append(tmd_tri)
 					#there is just one input strip created from the triangles
 					in_strip = stripify(tmd_piece_tris, stitchstrips = True)[0]
