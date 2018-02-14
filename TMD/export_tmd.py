@@ -4,9 +4,7 @@ import math
 import bpy
 import mathutils
 from struct import pack, unpack_from
-#from subprocess import check_call
 from .utils.tristrip import stripify
-#import random
 
 def export_matrix(mat):
 	bytes = b''
@@ -330,8 +328,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			me = ob.to_mesh(bpy.context.scene, True, "PREVIEW", calc_tessface=True, calc_undeformed=False)
 			me.calc_normals_split()
 			#and restore the armature modifier
-			mod = ob.modifiers.new('SkinDeform', 'ARMATURE')
-			mod.object = armature
+			ob.modifiers.new('SkinDeform', 'ARMATURE').object = armature
 			
 			#initialize the piece lists
 			max_pieces = 4
@@ -363,7 +360,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					bones_to_add = sum([1 for bone_name in tri_bones if bone_name not in bones_pieces[i]])
 					
 					#so can we add it to this piece? if not go to the next loop/piece
-					if len(bones_pieces[i]) + bones_to_add > 28:
+					if len(bones_pieces[i]) + bones_to_add > 27:
 						continue
 						
 					#ok we can add it, so add it to the bones
@@ -430,13 +427,11 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
 							dummy = pack('3f 2f', co.x, co.y, co.z, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
 							#we could probably spread them out by pieces, but it doesn't seem to be required
-							#if vert not in mesh_vertices:
 							if dummy not in dummy_vertices:
 								dummy_vertices.append(dummy)
 								mesh_vertices.append(vert)
 							
 							# #get the corrected index for this tri
-							#tmd_tri.append(mesh_vertices.index(vert))
 							tmd_tri.append(dummy_vertices.index(dummy))
 						tmd_piece_tris.append(tmd_tri)
 					#there is just one input strip created from the triangles
@@ -465,9 +460,9 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
 				bbe_x, bbe_y, bbe_z = ob.dimensions
 			
-				#just dump all verts into the first piece
+				#just dump all verts into the last piece
 				piece_verts = []
-				if piece_i == 0:
+				if piece_i == len(piece_data)-1:
 					piece_verts = mesh_vertices
 				
 				print("\nWriting piece",piece_i)

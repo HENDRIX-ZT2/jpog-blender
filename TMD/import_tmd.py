@@ -310,17 +310,15 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me.uv_textures.new("UV")
 			me.uv_layers[-1].data.foreach_set("uv", [uv for pair in [mesh_verts[l.vertex_index][14:16] for l in me.loops] for uv in (pair[0], -pair[1])])
 			
-			#build a correctly sorted normals array, sorted by the order of faces - loops does not work!!
+			#setting the normals works, but the effect is ruined by remove_doubles
+			#build a correctly sorted normals array, sorted by the order of faces
 			no_array = []
 			for face in me.polygons:
 				for vertex_index in face.vertices:
-					no_array.append(mesh_verts[vertex_index][3:6])	
+					no_array.append(mesh_verts[vertex_index][3:6])
 				face.use_smooth = True
 			if use_custom_normals:
 				me.use_auto_smooth = True
-				#doesn't seem to need either in current blender, but the normals are not exactly as intended
-				#bpy.ops.mesh.customdata_custom_splitnormals_add()
-				#me.calc_normals_split()
 				me.normals_split_custom_set(no_array)
 				
 			#so ugly, working with context and operators - perhaps there is a better solution
@@ -329,6 +327,13 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			bpy.ops.mesh.remove_doubles(threshold = 0.0001, use_unselected = False)
 			bpy.ops.uv.seams_from_islands()
 			bpy.ops.object.mode_set(mode = 'OBJECT')
+			
+			# bm = bmesh.new()
+			# bm.from_mesh(me)
+			# bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=distance)
+			# bm.to_mesh(me)
+			# me.update()
+			# bm.free()
 	
 	tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref.split(b"\x00")[0].decode("utf-8")+".tkl")
 	vars["tkl_path"] = tkl_path
