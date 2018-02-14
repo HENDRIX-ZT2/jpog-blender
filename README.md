@@ -25,7 +25,6 @@ A toolset for blender allowing the import and export of Jurassic Park - Operatio
 
 ### Known Limitations
 - Animations break other animals using the same TKL file.
-- Bug: Support for models rigged to more than 28 bones is implemented, but does not work properly and results in blue flashing models.
 
 ### Credits
 - Equinox of https://github.com/OpenJPOG for file format specification and support
