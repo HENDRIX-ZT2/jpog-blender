@@ -264,7 +264,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				#verts can be referred to from another piece!
 				print("stripstart",pos)
 				mesh_tristrips.append(unpack_from(str(num_strip_indices)+"h ", datastream, pos))
-				
 				pos += 2*num_strip_indices
 			#print(mesh_verts)
 			#print(mesh_tristrips)

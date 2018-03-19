@@ -18,6 +18,8 @@ def log_error(error):
 			
 def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, export_anims = False, create_lods = False, append_anims = False, pad_anims = False, numlods = 1, rate = 1):
 
+	MAX_BONES_PER_PIECE = 27
+
 	print("\nStarting export to",filepath)
 	starttime = time.clock()
 	global errors
@@ -360,7 +362,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 					bones_to_add = sum([1 for bone_name in tri_bones if bone_name not in bones_pieces[i]])
 					
 					#so can we add it to this piece? if not go to the next loop/piece
-					if len(bones_pieces[i]) + bones_to_add > 27:
+					if len(bones_pieces[i]) + bones_to_add > MAX_BONES_PER_PIECE:
 						continue
 						
 					#ok we can add it, so add it to the bones
@@ -454,7 +456,18 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, me.materials[0].name.encode("utf-8")))
 			for piece_i in range(0, len(piece_data)):
 				
+				print("\nWriting piece",piece_i)
 				strip, piece_bone_names = piece_data[piece_i]
+				for bone_name in piece_bone_names:
+					bone = armature.data.bones[bone_name]
+					if bone.parent:
+						parent_name = bone.parent.name
+						if parent_name not in piece_bone_names:
+							if len(piece_bone_names) < MAX_BONES_PER_PIECE:
+								print("Extending bone parent chain by",parent_name)
+								piece_bone_names.append(parent_name)
+				#print(piece_bone_names)
+				print("piece_bones:", len(piece_bone_names))
 				
 				#note that these are for the whole object and not the piece - might have to be adjusted
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
@@ -465,9 +478,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				if piece_i == len(piece_data)-1:
 					piece_verts = mesh_vertices
 				
-				print("\nWriting piece",piece_i)
 				print("strip_entries:", len(strip))
-				print("piece_bones:", len(piece_bone_names))
 				print("piece_verts:", len(piece_verts))
 				
 				#write the mesh_piece header
