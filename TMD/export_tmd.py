@@ -475,7 +475,8 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 			
 				#just dump all verts into the last piece
 				piece_verts = []
-				if piece_i == len(piece_data)-1:
+				#if piece_i == len(piece_data)-1:
+				if piece_i == 0:
 					piece_verts = mesh_vertices
 				
 				print("strip_entries:", len(strip))

@@ -43,7 +43,7 @@ class ImportTMD(bpy.types.Operator, ImportHelper):
 	use_custom_normals = BoolProperty(name="Use TMD Normals", description="Preserves the original shading of a TMD.", default=False)
 	use_anims = BoolProperty(name="Import Anims", description="If checked, all animations will be imported.", default=True)
 	extract_textures = BoolProperty(name="Extract TMLs", description="Unpack textures from TML files.", default=True)
-	#mirror_mesh = BoolProperty(name="Mirror Rigged Meshes", description="Mirrors models with a skeleton. Careful, sometimes bones don't match!", default=True)
+	set_fps = BoolProperty(name="Adjust FPS", description="Set the scene to 30 frames per second to conform with the TMDs.", default=True)
 	def execute(self, context):
 		from . import import_tmd
 		keywords = self.as_keywords(ignore=("axis_forward", "axis_up", "filter_glob"))
@@ -61,16 +61,6 @@ class ExportTMD(bpy.types.Operator, ExportHelper):
 	export_anims = BoolProperty(name="Export Anims", description="If checked, animations are exported from blender. If not, keyframes are copied from the imported TMD and no TKL is created.", default=False)
 	append_anims = BoolProperty(name="Append Anims", description="If checked, the original keyframes are included in the exported TKL file. If not, only the keyframes from blender are written.", default=False)
 	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL.", default=False)
-	# author_name = StringProperty(name="Author", description="A signature included in the TMD file.", default=author)
-	# create_lods = BoolProperty(name="Create LODs", description="Adds Levels of Detail - overwrites existing LODs!", default=True)
-	# numlods = IntProperty(	name="Number of LODs",
-							# description="Number of Levels Of Detail, including the original",
-							# min=1, max=5,
-							# default=2,)
-	# rate = IntProperty(	name="Detail Decrease Rate",
-							# description="The higher, the faster the detail will decrease: ratio = 1 /(LODX + Rate)",
-							# min=1, max=5,
-							# default=2,)
 	def execute(self, context):
 		from . import export_tmd
 		keywords = self.as_keywords(ignore=("axis_forward", "axis_up", "filter_glob", "check_existing"))

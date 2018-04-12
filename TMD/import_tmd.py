@@ -84,7 +84,7 @@ def mat3_to_vec_roll(mat):
 	roll = math.atan2(rollmat[0][2], rollmat[2][2])
 	return vec, roll
 			
-def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False, extract_textures=False):
+def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False, extract_textures=False, set_fps=False):
 
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
@@ -264,6 +264,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				#verts can be referred to from another piece!
 				print("stripstart",pos)
 				mesh_tristrips.append(unpack_from(str(num_strip_indices)+"h ", datastream, pos))
+				#print([bone_names[i] for i in mesh_piece_node_indices[meshpiece]])
 				pos += 2*num_strip_indices
 			#print(mesh_verts)
 			#print(mesh_tristrips)
@@ -357,6 +358,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			pos+=16
 		
 		#anims
+		if set_fps:
+			bpy.context.scene.render.fps = 30
+			print("Adjusted scene FPS!")
 		fps = bpy.context.scene.render.fps
 		armature.animation_data_create()
 		pos = anim_pointer
@@ -404,10 +408,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 						#we must make this matrix relative to the rest pose to conform with how blender bones work
 						key_matrix = fallback_matrix[bone_name].inverted() * key_matrix
 						key_matrix =  correction_local * key_matrix *correction_local.inverted()
+						key_frame = key_time*fps
 						for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
-							fcurve.keyframe_points.insert(key_time*fps, key).interpolation = "LINEAR"
+							fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
 						for fcurve, key in zip(rot_fcurves, key_matrix.to_quaternion()):
-							fcurve.keyframe_points.insert(key_time*fps, key).interpolation = "LINEAR"
+							fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
 						pos+=8
 			
 			#loop looped anims
