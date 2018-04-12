@@ -16,7 +16,7 @@ def log_error(error):
 	global errors
 	errors.append(error)
 			
-def save(operator, context, filepath = '', author_name = "HENDRIX", export_materials = True, export_anims = False, create_lods = False, append_anims = False, pad_anims = False, numlods = 1, rate = 1):
+def save(operator, context, filepath = '', export_anims = False, create_lods = False, pad_anims = False, numlods = 1, rate = 1):
 
 	MAX_BONES_PER_PIECE = 27
 
@@ -137,9 +137,6 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 	bones_bytes = b"".join(bones_bytes)
 	
 	if export_anims:
-	
-		#tkl_ref = os.path.basename(filepath[:-4])[:6]
-		
 		#overwrite mode
 		tkl_ref = os.path.basename(vars["tkl_path"][:-4])[:6]
 		print("Going to create",tkl_ref+".tkl")
@@ -154,20 +151,6 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 		with open(tkl_path, 'rb') as f:
 			tklstream = f.read()
 		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
-		if append_anims:
-			print("Loading existing TKL file for appending.")
-			#tkl_i04 probably another size value, close to tkl_remaining_bytes
-			pos = 56
-			for i in range(0, num_loc):
-				all_locs.append(mathutils.Vector((unpack_from("3f", tklstream, pos))))
-				pos+=12
-			for i in range(0, num_rot):
-				x,y,z,w = unpack_from("4f", tklstream, pos)
-				all_quats.append(mathutils.Quaternion((w,x,y,z)))
-				pos+=16
-			
-			print("Existing Loc Keys:",len(all_locs))
-			print("Existing Rot Keys:",len(all_quats))
 		
 		fps = bpy.context.scene.render.fps
 		#note this var is not encrypted here
@@ -211,7 +194,6 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				if (not rotations) and (not translations):
 					channel_mode = 2
 					num_keys = 0
-					def get_key(rotations, translations, i): return 0, mathutils.Matrix()
 				elif not translations:
 					channel_mode = 0
 					num_keys = min([len(channel.keyframe_points) for channel in rotations])
@@ -227,7 +209,7 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 						return translations[0].keyframe_points[i].co[0]/fps, key_matrix
 				else:
 					channel_mode = 1
-					num_keys = min([len(channel.keyframe_points) for channel in rotations])
+					num_keys = min([len(channel.keyframe_points) for channel in rotations+translations])
 					def get_key(rotations, translations, i):
 						key_matrix = mathutils.Quaternion([fcurve.keyframe_points[i].co[1] for fcurve in rotations]).to_matrix().to_4x4()
 						key_matrix.translation = [fcurve.keyframe_points[i].co[1] for fcurve in translations]
@@ -235,11 +217,19 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				
 				#now, we assume that all curves are the same length and the keys are in columns
 				#the bake action script will create them like this, but the normal user won't
+				#more flexible, but costly:
+				#-optionally, see if all are the same length: all(len(x)==len(myList[0]) for x in myList)
+				#-collect all times
+				#-collect all keys in a dict
+				#-retrieve the keys for each time, or fall back to evaluate()
 				
 				channel_bytes.append(pack('2H', channel_mode, num_keys ))
 				for i in range(0, num_keys):
 					#space conversion, simply inverse of import
-					timestamp, key_matrix = get_key(rotations, translations, i)
+					try:
+						timestamp, key_matrix = get_key(rotations, translations, i)
+					except:
+						log_error("Bone "+bone_name+" in "+action_name+" has incomplete / faulty keyframes.")
 					
 					key_matrix = correction_local.inverted() * key_matrix * correction_local
 					key_matrix = fallback_matrix[group.name] * key_matrix
@@ -458,14 +448,15 @@ def save(operator, context, filepath = '', author_name = "HENDRIX", export_mater
 				
 				print("\nWriting piece",piece_i)
 				strip, piece_bone_names = piece_data[piece_i]
-				for bone_name in piece_bone_names:
-					bone = armature.data.bones[bone_name]
-					if bone.parent:
-						parent_name = bone.parent.name
-						if parent_name not in piece_bone_names:
-							if len(piece_bone_names) < MAX_BONES_PER_PIECE:
-								print("Extending bone parent chain by",parent_name)
-								piece_bone_names.append(parent_name)
+				# apparently, this does not fix the issue for acro
+				# for bone_name in piece_bone_names:
+					# bone = armature.data.bones[bone_name]
+					# if bone.parent:
+						# parent_name = bone.parent.name
+						# if parent_name not in piece_bone_names:
+							# if len(piece_bone_names) < MAX_BONES_PER_PIECE:
+								# print("Extending bone parent chain by",parent_name)
+								# piece_bone_names.append(parent_name)
 				#print(piece_bone_names)
 				print("piece_bones:", len(piece_bone_names))
 				

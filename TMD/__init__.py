@@ -59,8 +59,7 @@ class ExportTMD(bpy.types.Operator, ExportHelper):
 	filename_ext = ".TMD"
 	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	export_anims = BoolProperty(name="Export Anims", description="If checked, animations are exported from blender. If not, keyframes are copied from the imported TMD and no TKL is created.", default=False)
-	append_anims = BoolProperty(name="Append Anims", description="If checked, the original keyframes are included in the exported TKL file. If not, only the keyframes from blender are written.", default=False)
-	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL.", default=False)
+	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL. Good for quick tests. Use the tkl-merger for proper versions.", default=False)
 	def execute(self, context):
 		from . import export_tmd
 		keywords = self.as_keywords(ignore=("axis_forward", "axis_up", "filter_glob", "check_existing"))
