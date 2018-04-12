@@ -385,12 +385,14 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				pos += 4
 				if channel_mode != 2:
 					# 0 = fallback trans, quat key
-					# 1 = trans + rot keys
+					# 1 = trans + quat keys
 					# 2 = skip
 					# 3 = fallback quat, trans key
 					#initialize all fcurves
-					loc_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].location', index = i, action_group = bone_name) for i in (0,1,2)]
-					rot_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].rotation_quaternion', index = i, action_group = bone_name) for i in (0,1,2,3)]
+					if channel_mode in (3, 1):
+						loc_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].location', index = i, action_group = bone_name) for i in (0,1,2)]
+					if channel_mode in (0, 1):
+						rot_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].rotation_quaternion', index = i, action_group = bone_name) for i in (0,1,2,3)]
 					for i in range(0,num_frames):
 						key_time, loc_index, rot_index = unpack_from("f H H", datastream, pos)
 						#build a matrix from this key and save it
@@ -409,10 +411,12 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 						key_matrix = fallback_matrix[bone_name].inverted() * key_matrix
 						key_matrix =  correction_local * key_matrix *correction_local.inverted()
 						key_frame = key_time*fps
-						for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
-							fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
-						for fcurve, key in zip(rot_fcurves, key_matrix.to_quaternion()):
-							fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
+						if channel_mode in (3, 1):
+							for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
+								fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
+						if channel_mode in (0, 1):
+							for fcurve, key in zip(rot_fcurves, key_matrix.to_quaternion()):
+								fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
 						pos+=8
 			
 			#loop looped anims
