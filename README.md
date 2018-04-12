@@ -21,10 +21,10 @@ A toolset for blender allowing the import and export of Jurassic Park - Operatio
 - Warning: Needs animations to be exported for ideal results! It will do _something_ without new animations, but won't be perfect.
 - Select the armature in object mode, scale it to the desired size and press `Apply Scale to Objects and Animations` in the tool shelf. Export with animations.
 #### Custom Animations
-- Are theoretically supported, but not tested yet. Edited animations are tested and functional, but under the limitation that _any_ edit of animations breaks the other animals in a dig site. You could replace them with new animals using the new anims. A TKL merger to solve this sort of problems is planned, but not yet started.
+- Are theoretically supported, but not tested yet. 
 
 ### Known Limitations
-- Animations break other animals using the same TKL file.
+- Animations break other animals using the same TKL file. Edited animations are tested and functional, but under the limitation that _any_ edit of animations breaks the other animals in a dig site. You can use the [TKL merger](https://github.com/HENDRIX-ZT2/jpog-tkl-merger) to combine animals with edited animations and shuffle them between different dig sites. Be aware that this is incompatible with any other modded TMDs you might be using.
 
 ### Credits
 - Equinox of https://github.com/OpenJPOG for file format specification and support
