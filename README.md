@@ -5,8 +5,7 @@ A toolset for blender allowing the import and export of Jurassic Park - Operatio
 
 ### Installation
 - Click the `Clone or Download` button at the right, then `Download ZIP`.
-- Extract the ZIP you just downloaded and pack the _contents_ of the `jpog-blender-master` folder into a new ZIP file.
-- To install with the addon installer in Blender, click `File` > `User Preferences` > `Add-ons` > `Install Add-ons from File` and select your new ZIP file.
+- To install with the addon installer in Blender, click `File` > `User Preferences` > `Add-ons` > `Install Add-ons from File` and select the ZIP you just downloaded.
 
 ### Before You Start
 - Make sure you gain writing privileges for the JPOG folders.
