@@ -38,7 +38,7 @@ class ImportTMD(bpy.types.Operator, ImportHelper):
 	bl_idname = "import_scene.toshi_tmd"
 	bl_label = 'Import TMD'
 	bl_options = {'UNDO'}
-	filename_ext = ".TMD"
+	filename_ext = ".tmd"
 	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	use_custom_normals = BoolProperty(name="Use TMD Normals", description="Preserves the original shading of a TMD.", default=False)
 	use_anims = BoolProperty(name="Import Anims", description="If checked, all animations will be imported.", default=True)
@@ -56,10 +56,10 @@ class ExportTMD(bpy.types.Operator, ExportHelper):
 	"""Export to TMD file format (.TMD)"""
 	bl_idname = "export_scene.toshi_tmd"
 	bl_label = 'Export TMD'
-	filename_ext = ".TMD"
+	filename_ext = ".tmd"
 	filter_glob = StringProperty(default="*.tmd", options={'HIDDEN'})
 	export_anims = BoolProperty(name="Export Anims", description="If checked, animations are exported from blender. If not, keyframes are copied from the imported TMD and no TKL is created.", default=False)
-	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL. Good for quick tests. Use the tkl-merger for proper versions.", default=False)
+	pad_anims = BoolProperty(name="Pad Anims", description="If checked, only keyframes from blender will be exported and then padded to the original length of the TKL. Good for quick tests. Warning - this can overwrite original TKLs. Use the tkl-merger for proper versions and turn this off. If it is off, the exported TKL file has the same name as your exported model.", default=False)
 	def execute(self, context):
 		from . import export_tmd
 		keywords = self.as_keywords(ignore=("axis_forward", "axis_up", "filter_glob", "check_existing"))

@@ -137,8 +137,13 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 	bones_bytes = b"".join(bones_bytes)
 	
 	if export_anims:
-		#overwrite mode
-		tkl_ref = os.path.basename(vars["tkl_path"][:-4])[:6]
+		#just set overwrite the original for quick testing
+		if pad_anims:
+			tkl_ref = os.path.basename(vars["tkl_path"][:-4])[:6]
+		#just a dummy file which has to be merged
+		else:
+			tkl_ref = os.path.basename(filepath[:-4])[:6]
+			
 		print("Going to create",tkl_ref+".tkl")
 		
 		anim_bytes = []
@@ -277,11 +282,6 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 	
 		print("Final Loc keys:",len(all_locs))
 		print("Final Rot keys:",len(all_quats))	
-		
-		#make a backup of the TKL if there is no backup yet
-		tkl_backup =  vars["tkl_path"][:-4]+"_backup.tkl"
-		if not os.path.isfile(tkl_backup):
-			os.rename(vars["tkl_path"], tkl_backup)
 		
 		#create the TKL file
 		tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref+".tkl")
@@ -509,11 +509,6 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 		
 	lod_bytes = b"".join(lod_bytes)
 
-	#make a backup of the tmd if there is no backup yet
-	#tmd_backup =  vars["tmd_path"][:-4]+"_backup.tmd"
-	#if not os.path.isfile(tmd_backup):
-	#	os.rename(vars["tmd_path"], tmd_backup)
-		
 	with open(filepath, 'wb') as f:
 		remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
 		
