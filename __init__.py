@@ -4,20 +4,13 @@ bl_info = {	"name": "Toshi TMD format (JPOG)",
 			"location": "File > Import-Export",
 			"description": "Import-Export models, skeletons and animations.",
 			"warning": "",
+			"wiki_url": "https://github.com/HENDRIX-ZT2/jpog-blender",
 			"support": 'COMMUNITY',
+			"tracker_url": "https://github.com/HENDRIX-ZT2/jpog-blender/issues/new",
 			"category": "Import-Export"}
-			
-# #need this?
-if "bpy" in locals():
-	import importlib
-	if "import_tmd" in locals():
-		importlib.reload(import_tmd)
-	if "export_tmd" in locals():
-		importlib.reload(export_tmd)
-
 import bpy
-from bpy.props import StringProperty, FloatProperty, BoolProperty, IntProperty, CollectionProperty
-from bpy_extras.io_utils import (ImportHelper, ExportHelper)
+from bpy.props import StringProperty, BoolProperty
+from bpy_extras.io_utils import ImportHelper, ExportHelper
 from bpy_extras.object_utils import AddObjectHelper, object_data_add
 import bpy.utils.previews
 preview_collection = bpy.utils.previews.new()
