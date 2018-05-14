@@ -6,6 +6,17 @@ import mathutils
 from struct import pack, unpack_from
 from .utils.tristrip import stripify
 
+def get_armature():
+	src_armatures = [ob for ob in bpy.data.objects if type(ob.data) == bpy.types.Armature]
+	#do we have armatures?
+	if src_armatures:
+		#see if one of these is selected
+		if len(src_armatures) > 1:
+			sel_armatures = [ob for ob in src_armatures if ob.select]
+			if sel_armatures:
+				return sel_armatures[0]
+		return src_armatures[0]
+		
 def export_matrix(mat):
 	bytes = b''
 	for row in mat: bytes += pack('=4f',*row)
@@ -19,105 +30,72 @@ def log_error(error):
 def save(operator, context, filepath = '', export_anims = False, create_lods = False, pad_anims = False, numlods = 1, rate = 1):
 
 	MAX_BONES_PER_PIECE = 27
+	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
+	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 
 	print("\nStarting export to",filepath)
 	starttime = time.clock()
 	global errors
 	errors = []
 
-	text_name = "JPOG.txt"
-	if text_name not in bpy.data.texts:
-		log_error("You must import a TMD file before you can export one!")
+	armature = get_armature()
+	try:
+		tmd_in_path = armature["tmd_path"]
+	except KeyError:
+		log_error("Custom property 'tmd_path' is missing from the armature. Add it in the armature's object tab!")
 		return errors
-	
-	#get the vars
-	text_ob = bpy.data.texts[text_name]
-	#yes bad but I am lazy
-	vars = eval(text_ob.as_string())
-	
-	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
-	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
-	
-	for armature in bpy.data.objects:
-		if type(armature.data) == bpy.types.Armature:
-			break
-	# implement ZT2 like filtering at some point, so only baked anims are exported
-	animations = bpy.data.actions
-	
-	#probably version number
-	#uncommon:
-	#magic_value1 2316361
-	#magic_value2 136
-	#more common
-	#magic_value1 = 3299401
-	#magic_value2 = 1960
-	magic_value1 = vars["magic_value1"]
-	magic_value2 = vars["magic_value2"]
-	salt = vars["salt"]
-	u1 = vars["u1"]
-	u2 = vars["u2"]
-	u3 = vars["u3"]
-	num_anims = len(animations)
-	u4 = vars["u4"]
-	node_data = 124
-	anim_pointer = node_data + 176 * len(armature.data.bones)
-	#lod_data_offset = anim_pointer
-	print("node_data",node_data)
-	#let's not support that for now
-	#anim_pointer = 0
-	#pack("3I", aux_node_data, node_data, anim_pointer) ]
-
-	bones_bytes = []
-	fallback_matrix = {}
-	
-	#read the original TMD: do two things at max
-	#set the bone names list into the original order
-	#just copy the anim_bytes block from the imported file
-	if not export_anims:
-		tmd_path = vars["tmd_path"]
-		print("Copying anims from",tmd_path)
-		with open(tmd_path, 'rb') as f:
-			header = f.read(130)
-			remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
-			tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
-			scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
-			aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
-			#decrypt the addresses
-			aux_node_data += 60 - salt
-			node_data += 60 - salt
-			anim_pointer += 60 - salt
-			if aux_node_data == 124:
-				anim_pointer = node_data
-				node_data = aux_node_data
-			
+	#read the original TMD - do three things max:
+	#1) always get some of the magic numbers from the header
+	print("Reading data from original",tmd_in_path)
+	with open(tmd_in_path, 'rb') as f:
+		header = f.read(130)
+		remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
+		tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
+		scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
+		aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
+		#decrypt the addresses
+		aux_node_data += 60 - salt
+		node_data += 60 - salt
+		anim_pointer += 60 - salt
+		if aux_node_data == 124:
+			anim_pointer = node_data
+			node_data = aux_node_data
+		#2) set the bone names list into the original order
+		#3) copy the anim_bytes block from the imported file	
+		if not export_anims:
 			f.seek(anim_pointer)	
 			anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
 		
 			f.seek(node_data)
 			node_bytes = f.read(176 * num_nodes)
 			pos = 0
-			#note that these are not necessarily sorted, so we must build a list manually and can't just take the bones from the armature in the end!
+			#note that these are not necessarily sorted the same way as in blender's armature!
 			bone_names = []
 			for i in range(0, num_nodes):
 				name_len =  unpack_from("B", node_bytes, pos+144)[0]
 				bone_name = unpack_from(str(name_len)+"s", node_bytes, pos+145)[0].rstrip(b"\x00").decode("utf-8")
 				bone_names.append(bone_name)
 				pos+=176
+			#do all bones match up between TMD and blender?
+			if set(bone_names) != set(armature.data.bones.keys()):
+				log_error("Bone mismatch between source TMD and blender armature. If you have imported another model since, re-import the desired source model, delete it and try again. Alternatively, you might want to export custom anims.")
+				return errors
+		else:
+			# create a new sorting from blender bones, updated bones before non-updated bones.
+			b_bones = armature.data.bones.keys()
+			bone_names = [b for b in b_bones if armature.data.bones[b].use_deform] + [b for b in b_bones if not armature.data.bones[b].use_deform]
 
-	else:
-		# create a new sorting from blender bones, updated bones before non-updated bones.
-		b_bones = armature.data.bones.keys()
-		bone_names = [b for b in b_bones if armature.data.bones[b].use_deform] + [b for b in b_bones if not armature.data.bones[b].use_deform]
-
+	#TODO: implement ZT2 like filtering at some point, so only baked anims are exported
+	animations = bpy.data.actions
+	num_anims = len(animations)
+	node_data = 124
+	anim_pointer = node_data + 176 * len(armature.data.bones)
+	bones_bytes = []
+	fallback_matrix = {}
 	#export all bones in the correct order
 	for bone_name in bone_names:
-		try:
-			bone = armature.data.bones[bone_name]
-		except:
-			#skip this bone
-			log_error("Bone "+bone_name+" is missing from the armature, but was expected to be there as the original model contained it.")
-			continue
-		#for the export, we get the original bind like this
+		bone = armature.data.bones[bone_name]
+		#we get the original bind like this:
 		bind = correction_global.inverted() *  correction_local.inverted() * bone.matrix_local *  correction_local
 		mat_local = bind
 		#only non-skeletal nodes can ignore updates
@@ -133,32 +111,21 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 		l = mat_local.to_translation()
 		#note that on import, the bind is transposed right after reading, so here we do it in the very end 
 		bones_bytes.append( b"".join((pack('4f', q.x, q.y, q.z, q.w), export_matrix(bind.transposed()), export_matrix(bind.inverted().transposed()), pack('B 15s hH 3f', len(bone.name), bone_name.encode("utf-8"), parent_id, updates, *l) )))
-	
 	bones_bytes = b"".join(bones_bytes)
 	
 	if export_anims:
-		#just set overwrite the original for quick testing
-		if pad_anims:
-			tkl_ref = os.path.basename(vars["tkl_path"][:-4])[:6]
-		#just a dummy file which has to be merged
-		else:
-			tkl_ref = os.path.basename(filepath[:-4])[:6]
-			
-		print("Going to create",tkl_ref+".tkl")
-		
 		anim_bytes = []
 		channels_bytes = []
 		all_quats = []
 		all_locs = []
 		#just get all vars
-		#TODO: only read the header block, or store the vars
-		tkl_path = vars["tkl_path"]
-		with open(tkl_path, 'rb') as f:
-			tklstream = f.read()
+		tkl_in_path = os.path.join(os.path.dirname(tmd_in_path), tkl_ref+".tkl")
+		with open(tkl_in_path, 'rb') as f:
+			tklstream = f.read(60)
 		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
 		
 		fps = bpy.context.scene.render.fps
-		#note this var is not encrypted here
+		#note this is not encrypted here
 		offset = anim_pointer + len(animations) * 4
 		for action in animations:
 			print(action.name)
@@ -252,12 +219,12 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 				#now, we assume that all curves are the same length and the keys are in columns
 				channel_bytes.append(pack('2H', channel_mode, num_keys ))
 				for i in range(0, num_keys):
-					#space conversion, simply inverse of import
 					try:
 						timestamp, key_matrix = get_key(rotations, translations, i)
 					except:
 						log_error("Bone "+bone_name+" in "+action_name+" has incomplete / faulty keyframes.")
 					
+					#space conversion, simply inverse of import
 					key_matrix = correction_local.inverted() * key_matrix * correction_local
 					key_matrix = fallback_matrix[group.name] * key_matrix
 					
@@ -283,11 +250,13 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 		print("Final Loc keys:",len(all_locs))
 		print("Final Rot keys:",len(all_quats))	
 		
+		#create an individualized dummy file which has to be merged, otherwise keep the old tkl_ref
+		if not pad_anims: tkl_ref = os.path.basename(filepath)[:-4][:6]
 		#create the TKL file
-		tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref+".tkl")
-		print("\nWriting",tkl_path)
+		tkl_out_path = os.path.join(os.path.dirname(filepath), tkl_ref+".tkl")
+		print("\nWriting",tkl_out_path)
 		
-		#new test
+		#this is used for testing, so we just fill the TKL with dummy data to avoid crashes
 		if pad_anims:
 			all_locs.extend([all_locs[0] for x in range(num_loc-len(all_locs))])
 			all_quats.extend([all_quats[0] for x in range(num_rot-len(all_quats))])
@@ -295,31 +264,27 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 		tkl_locs = [pack("3f", *l) for l in all_locs]
 		tkl_quats = [pack("4f", q.x, q.y, q.z, q.w) for q in all_quats]
 		tkl_len_data = len(tkl_locs)*16 + len(tkl_quats)*12
-		#54 or 39- both exist?
-		#x = 54
-		#tkl_header = pack("4s I I 6s 10B 2I 5I", b"TPKL", 0, tkl_len_data+44, tkl_ref.encode("utf-8"), x, 0, 160, 152, x, 0, 212, 254, 18, 0, len(all_locs), len(all_quats), 0, 12, 16, 4, tkl_len_data)
 		tkl_header = pack("4s 4B I 6s 10B 2I 5I", b"TPKL", tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_len_data+44, tkl_ref.encode("utf-8"), tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, len(all_locs), len(all_quats), tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_len_data)
-		with open(tkl_path, 'wb') as f:
-			f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
+		try:
+			with open(tkl_out_path, 'wb') as f:
+				f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
+		except PermissionError:
+			log_error("You do not have writing permissions for "+os.path.dirname(filepath)+". Gain writing permissions there or export to another folder!")
+			return errors
 		
 	#find all models
 	lod_bytes = []
 	lods = []
 
-	#ideally
-	#ob.layers = (1 0 0 0 0 0 ...)
-	#ob.layers = (0 1 0 0 0 0 ...)
-	#bad data
-	#ob.layers = (1 1 1 1 1 0 ...)
 	for i in range(0,10):
-		lod = [ob for ob in bpy.data.objects if "_LOD"+str(i) in ob.name]
+		lod = [ob for ob in armature.children if "_LOD"+str(i) in ob.name]
 		if lod: lods.append(lod)
 		else: break
 	if not lods:
 		log_error("Could not find any LODs! Follow the naming convention of imported TMDs!")
 		return errors
 	
-	max_lod_distance = 2 * max(max(ob.dimensions) for ob in bpy.data.objects)
+	max_lod_distance = 2 * max(max(ob.dimensions) for ob in armature.children)
 	lod_bytes.append(pack('I f', len(lods), max_lod_distance))
 	for lod in lods:
 		#possibly LOD extents, ie. near far distance and bias?
@@ -508,17 +473,20 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 				lod_bytes.append(pack(str(len(strip))+"h", *strip))
 		
 	lod_bytes = b"".join(lod_bytes)
-
-	with open(filepath, 'wb') as f:
-		remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
+	try:
+		with open(filepath, 'wb') as f:
+			remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
+			
+			lod_offset = anim_pointer-60+len(anim_bytes)
+			print("node_data",node_data)
+			print("anim_pointer",anim_pointer)
+			print("lod_offset",lod_offset)
+			header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
+			f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
+	except PermissionError:
+		log_error("You do not have writing permissions for "+os.path.dirname(filepath)+". Gain writing permissions there or export to another folder!")
+		return errors
 		
-		lod_offset = anim_pointer-60+len(anim_bytes)
-		print("node_data",node_data)
-		print("anim_pointer",anim_pointer)
-		print("lod_offset",lod_offset)
-		header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
-		f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
-
 	success = '\nFinished TMD Export in %.2f seconds\n' %(time.clock()-starttime)
 	print(success)
 	return errors

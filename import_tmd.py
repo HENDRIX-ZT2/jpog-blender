@@ -6,6 +6,12 @@ import mathutils
 from struct import iter_unpack, unpack_from
 from subprocess import check_call
 from .utils.tristrip import triangulate
+		
+def create_ob(ob_name, ob_data):
+	ob = bpy.data.objects.new(ob_name, ob_data)
+	bpy.context.scene.objects.link(ob)
+	bpy.context.scene.objects.active = ob
+	return ob
 
 def get_text():
 	text_name = "JPOG.txt"
@@ -89,9 +95,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 	
-	#store unknown variables to retrieve them on export
-	vars = {}
-	
 	#set the visible layers for this scene
 	bools = []
 	for i in range(20):	 
@@ -108,7 +111,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	#when no object exists, or when we are in edit mode when script is run
 	try: bpy.ops.object.mode_set(mode='OBJECT')
 	except: pass
-	print("\nImporting",os.path.basename(filepath))
+	root_name = os.path.basename(filepath)
+	print("\nImporting",root_name)
 	with open(filepath, 'rb') as f:
 		datastream = f.read()
 	
@@ -116,15 +120,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2	 = unpack_from("I 8s 2L 4I", datastream, 8)
 	scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", datastream, 60)
 	aux_node_data, node_data, anim_pointer = unpack_from("3I", datastream, 60+56)
-	
-	vars["tmd_path"] = filepath
-	vars["salt"] = salt
-	vars["u1"] = u1
-	vars["u2"] = u2
-	vars["u3"] = u3
-	vars["u4"] = u4
-	vars["magic_value1"] = magic_value1
-	vars["magic_value2"] = magic_value2
 	
 	#print(aux_node_data, node_data, anim_pointer)
 	#decrypt the addresses
@@ -141,13 +136,13 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	#print(aux_node_data, node_data, anim_pointer)
 
 	#create the armature
-	armData = bpy.data.armatures.new("DUMMY Scene Root Armature")
-	armData.show_axes = True
-	armData.draw_type = 'STICK'
-	armature = bpy.data.objects.new("DUMMY Scene Root", armData)
+	arm_name = root_name[:-4]
+	arm_data = bpy.data.armatures.new(arm_name)
+	arm_data.show_axes = True
+	arm_data.draw_type = 'STICK'
+	armature = create_ob(arm_name, arm_data)
 	armature.show_x_ray = True
-	bpy.context.scene.objects.link(armature)
-	bpy.context.scene.objects.active = armature
+	armature["tmd_path"] = filepath
 	bpy.ops.object.mode_set(mode = 'EDIT')
 	
 	#read the bones
@@ -175,10 +170,10 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		pos+=176
 
 		#create a bone
-		bone = armData.edit_bones.new(bone_name)
+		bone = arm_data.edit_bones.new(bone_name)
 		#parent it and get the armature space matrix
 		if parent_id > -1:
-			bone.parent = armData.edit_bones[bone_names[parent_id]]
+			bone.parent = arm_data.edit_bones[bone_names[parent_id]]
 		
 		#create and pose the bone
 		#correct the bind pose matrix axis
@@ -192,7 +187,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		bone.use_deform = False if updates else True
 	
 	# #fix the bone length
-	for bone in armData.edit_bones:
+	for bone in arm_data.edit_bones:
 		if bone.parent:
 			if bone.children:
 				childheads = mathutils.Vector()
@@ -290,10 +285,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me = bpy.data.meshes.new(name)
 			me.from_pydata([v[0:3] for v in mesh_verts], [], triangulate(mesh_tristrips))
 			me.update()
-			ob = bpy.data.objects.new(name, me)
+			ob = create_ob(name, me)
 			mat_2_obj[matname].append(ob)
-			bpy.context.scene.objects.link(ob)
-			bpy.context.scene.objects.active = ob
 			ob.layers = select_layer(level)
 			
 			#weight painting
@@ -317,241 +310,177 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				for vertex_index in face.vertices:
 					no_array.append(mesh_verts[vertex_index][3:6])
 				face.use_smooth = True
+				#and for rendering, make sure each poly is assigned to the material
+				face.material_index = 0
 			if use_custom_normals:
 				me.use_auto_smooth = True
 				me.normals_split_custom_set(no_array)
-				
-			#so ugly, working with context and operators - perhaps there is a better solution
-			bpy.context.scene.objects.active = ob
-			bpy.ops.object.mode_set(mode = 'EDIT')
-			bpy.ops.mesh.remove_doubles(threshold = 0.0001, use_unselected = False)
-			bpy.ops.uv.seams_from_islands()
-			bpy.ops.object.mode_set(mode = 'OBJECT')
+			else:	
+				#so ugly, working with context and operators - perhaps there is a better solution
+				bpy.ops.object.mode_set(mode = 'EDIT')
+				bpy.ops.mesh.remove_doubles(threshold = 0.0001, use_unselected = False)
+				bpy.ops.uv.seams_from_islands()
+				bpy.ops.object.mode_set(mode = 'OBJECT')
 			
-			# bm = bmesh.new()
-			# bm.from_mesh(me)
-			# bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=distance)
-			# bm.to_mesh(me)
-			# me.update()
-			# bm.free()
-	
 	tkl_path = os.path.join(os.path.dirname(filepath), tkl_ref.split(b"\x00")[0].decode("utf-8")+".tkl")
-	vars["tkl_path"] = tkl_path
 	if use_anims:
 		#read the tkl
 		print("\nReading",tkl_path)
-		with open(tkl_path, 'rb') as f:
-			tklstream = f.read()
-		
-		loc_lut = {}
-		rot_lut = {}
-		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
-		#tkl_i04 probably another size value, close to tkl_remaining_bytes
-		pos = 56
-		print("Num Keys:",num_loc,num_rot)
-		for i in range(0, num_loc):
-			loc_lut[i] = mathutils.Vector((unpack_from("3f", tklstream, pos)))
-			pos+=12
-		for i in range(0, num_rot):
-			x,y,z,w = unpack_from("4f", tklstream, pos)
-			rot_lut[i] = mathutils.Quaternion((w,x,y,z))
-			pos+=16
-		
-		#anims
-		if set_fps:
-			bpy.context.scene.render.fps = 30
-			print("Adjusted scene FPS!")
-		fps = bpy.context.scene.render.fps
-		armature.animation_data_create()
-		pos = anim_pointer
-		anim_offsets = unpack_from(str(num_anims)+"I", datastream, pos)
-		#read all anims
-		for anim_offset in anim_offsets:
-			pos = anim_offset + 60 - salt
-			name_len =  unpack_from("B", datastream, pos)[0]
-			anim_name = unpack_from(str(name_len)+"s", datastream, pos+1)[0].rstrip(b"\x00").decode("utf-8")
-			ub1, ub2, num_groups, duration =  unpack_from("3I f", datastream, pos+16)
-			channel_offsets = unpack_from(str(num_nodes)+"I", datastream, pos+32)
-			#create the action
-			action = bpy.data.actions.new(name = anim_name+str(ub1)+str(ub2))
-			action.use_fake_user = True
-			armature.animation_data.action = action
-			#read all bone channels
-			for i, channel_offset in enumerate(channel_offsets):
-				bone_name = bone_names[i]
-				channel_offset += 60 - salt
-				pos = channel_offset
-				channel_mode, num_frames =  unpack_from("2H", datastream, pos)
-				pos += 4
-				if channel_mode != 2:
-					# 0 = fallback trans, quat key
-					# 1 = trans + quat keys
-					# 2 = skip
-					# 3 = fallback quat, trans key
-					#initialize all fcurves
-					if channel_mode in (3, 1):
-						loc_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].location', index = i, action_group = bone_name) for i in (0,1,2)]
-					if channel_mode in (0, 1):
-						rot_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].rotation_quaternion', index = i, action_group = bone_name) for i in (0,1,2,3)]
-					for i in range(0,num_frames):
-						key_time, loc_index, rot_index = unpack_from("f H H", datastream, pos)
-						#build a matrix from this key and save it
-						key_matrix = rot_lut[rot_index].to_matrix().to_4x4()
-						#use the fallback if we should
-						if channel_mode == 0:
-							key_matrix.translation = fallback_matrix[bone_name].translation
-						if channel_mode == 1:
-							key_matrix.translation = loc_lut[loc_index]
-						if channel_mode == 3:
-							key_matrix = fallback_matrix[bone_name]
-							key_matrix.translation = loc_lut[loc_index]
-						
-						#and do local space correction only (as keyframes do not act in global space)
-						#we must make this matrix relative to the rest pose to conform with how blender bones work
-						key_matrix = fallback_matrix[bone_name].inverted() * key_matrix
-						key_matrix =  correction_local * key_matrix *correction_local.inverted()
-						key_frame = key_time*fps
+		try:
+			with open(tkl_path, 'rb') as f:
+				tklstream = f.read()
+			loc_lut = {}
+			rot_lut = {}
+			tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
+			#tkl_i04 probably another size value, close to tkl_remaining_bytes
+			pos = 56
+			print("Num Keys:",num_loc,num_rot)
+			for i in range(0, num_loc):
+				loc_lut[i] = mathutils.Vector((unpack_from("3f", tklstream, pos)))
+				pos+=12
+			for i in range(0, num_rot):
+				x,y,z,w = unpack_from("4f", tklstream, pos)
+				rot_lut[i] = mathutils.Quaternion((w,x,y,z))
+				pos+=16
+			
+			if set_fps:
+				bpy.context.scene.render.fps = 30
+				print("Adjusted scene FPS!")
+			fps = bpy.context.scene.render.fps
+			armature.animation_data_create()
+			pos = anim_pointer
+			anim_offsets = unpack_from(str(num_anims)+"I", datastream, pos)
+			#read all anims
+			for anim_offset in anim_offsets:
+				pos = anim_offset + 60 - salt
+				name_len =  unpack_from("B", datastream, pos)[0]
+				anim_name = unpack_from(str(name_len)+"s", datastream, pos+1)[0].rstrip(b"\x00").decode("utf-8")
+				ub1, ub2, num_groups, duration =  unpack_from("3I f", datastream, pos+16)
+				channel_offsets = unpack_from(str(num_nodes)+"I", datastream, pos+32)
+				#create the action
+				action = bpy.data.actions.new(name = anim_name+str(ub1)+str(ub2))
+				action.use_fake_user = True
+				armature.animation_data.action = action
+				#read all bone channels
+				for i, channel_offset in enumerate(channel_offsets):
+					bone_name = bone_names[i]
+					channel_offset += 60 - salt
+					pos = channel_offset
+					channel_mode, num_frames =  unpack_from("2H", datastream, pos)
+					pos += 4
+					if channel_mode != 2:
+						# 0 = fallback trans, quat key
+						# 1 = trans + quat keys
+						# 2 = skip
+						# 3 = fallback quat, trans key
+						#initialize all fcurves
 						if channel_mode in (3, 1):
-							for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
-								fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
+							loc_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].location', index = i, action_group = bone_name) for i in (0,1,2)]
 						if channel_mode in (0, 1):
-							for fcurve, key in zip(rot_fcurves, key_matrix.to_quaternion()):
-								fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
-						pos+=8
-			
-			#there usually is very strong correlation, but alberto breaks the pattern
-			# if all(n in action.groups for n in bone_names):
-				# print(action.name,"ALL", ub1)
-			# else:
-				# print(action.name,"SOME", ub1)
-			
-			#loop looped anims
-			if "_lp" in anim_name.lower():
-				for fcurve in action.fcurves:
-					mod = fcurve.modifiers.new('CYCLES')
-			
+							rot_fcurves = [action.fcurves.new(data_path = 'pose.bones["'+bone_name+'"].rotation_quaternion', index = i, action_group = bone_name) for i in (0,1,2,3)]
+						for i in range(0,num_frames):
+							key_time, loc_index, rot_index = unpack_from("f H H", datastream, pos)
+							#build a matrix from this key and save it
+							key_matrix = rot_lut[rot_index].to_matrix().to_4x4()
+							#use the fallback if we should
+							if channel_mode == 0:
+								key_matrix.translation = fallback_matrix[bone_name].translation
+							if channel_mode == 1:
+								key_matrix.translation = loc_lut[loc_index]
+							if channel_mode == 3:
+								key_matrix = fallback_matrix[bone_name]
+								key_matrix.translation = loc_lut[loc_index]
+							
+							#and do local space correction only (as keyframes do not act in global space)
+							#we must make this matrix relative to the rest pose to conform with how blender bones work
+							key_matrix = fallback_matrix[bone_name].inverted() * key_matrix
+							key_matrix =  correction_local * key_matrix *correction_local.inverted()
+							key_frame = key_time*fps
+							if channel_mode in (3, 1):
+								for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
+									fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
+							if channel_mode in (0, 1):
+								for fcurve, key in zip(rot_fcurves, key_matrix.to_quaternion()):
+									fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
+							pos+=8
+				
+				#loop looped anims
+				if "_lp" in anim_name.lower():
+					for fcurve in action.fcurves:
+						mod = fcurve.modifiers.new('CYCLES')
+		except FileNotFoundError:
+			log_error(tkl_path+' is missing. Models should be imported from JPOG-like folder structure.')
+		
 	#find the right material
 	#create material and texture if they don't already exist
 	matlibs = os.path.join(os.path.dirname(os.path.dirname(filepath)), "matlibs")
 	if not os.path.isdir(matlibs):
-		log_error('/matlibs folder missing. Models should be imported from JPOG-like folder structure.')
+		log_error(matlibs+' is missing. Models should be imported from JPOG-like folder structure.')
 		matlibs = os.path.dirname(filepath)
 	if extract_textures:
+		tmls = [file for file in os.listdir(matlibs) if file.lower().endswith(".tml")]
 		try:
-			tmls = [file for file in os.listdir(matlibs) if file.lower().endswith(".tml")]
 			for tml in tmls:
 				tml_path = os.path.join(matlibs, tml)
 				with open(tml_path, 'rb') as f:
-					#read the last 2048 bytes
-					try:
-						f.seek(-2048,2)
-					#select few seem to be shorter, maybe we can skip the exception
-					except:
-						print("TOO SHORT",tml_path)
-						f.seek(0)
+					#read the last 2048 bytes, a select few (UI) seem to be shorter, maybe we can skip the exception
+					try: f.seek(-2048,2)
+					except: f.seek(0)
 					datastream = f.read()
 					# see if the matname is in it
 					for matname in mat_2_obj.keys():
-						#print((matname,))
 						if any((b"\x00"+matname.encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.title().encode('utf-8')+b"\x00" in datastream, b"\x00"+matname.lower().encode('utf-8')+b"\x00" in datastream)):
-							#print(matname,os.path.basename(tml_path))
-						
-							# #now read it properly
-							# f.seek(0)
-							# #header
-							# u6, num_textures = unpack_from("2I", datastream, 4)
-							# pos = 12
-							# print("Number of Textures:",num_textures)
-							# for texture in range(0, num_textures):
-								# tex_id, data_size, b00, b01, b02, b03, b04, b05, b06, b07, tex_format, width, height, b8, b9, b10, b11, b12, b13 = unpack_from("2I 8B 3H 6B", datastream, pos)
-								# #print(data_size, tex_format)
-								# pos+=data_size+28
-							# num_materials = unpack_from("I", datastream, pos)[0]
-							# mat_lut = list(iter_unpack("32s", datastream[pos+4 : pos+4+32*num_materials]))
-							# pos += 4+32*num_materials
-							# print("mat_lut:",mat_lut)
-							# for material in range(0, num_materials):
-								# lut_index, u7, num_mat_textures = unpack_from("I 2H", datastream, pos)
-								# #unknown tends to be 2 or 3
-								# print(lut_index, u7, num_mat_textures)
-								# #matname = mat_lut[lut_index]
-								# #indices into the list of textures, which should probably be built or stored in a dict
-								# used_textures =  unpack_from(str(num_mat_textures)+"I", datastream, pos+8)
-								# pos += 8 + 4* num_mat_textures
-								
 							#extract all to bmp
 							check_call(os.path.join(os.path.dirname(__file__), 'ConvertTML.exe "'+tml_path+'"'))
-							#we only have to unpack this once
+							#we only have to unpack this TML once
 							break
 		except:
 			log_error('TML reading failed! Could not extract textures.')
 		
-	try:
-		for matname in mat_2_obj.keys():
-					
-			print("Material:",matname)
-			#create or retrieve a material
-			if matname not in bpy.data.materials:
-				mat = bpy.data.materials.new(matname)
-				mat.specular_intensity = 0.0
-				mat.ambient = 1
-				mat.use_transparency = True
-			else:
-				mat = bpy.data.materials[matname]
-				
-			#even if no TMLs were found, we still get a dummy material (for re-export!)
-			for ob in mat_2_obj[matname]:
-				me = ob.data
-				#needed?
-				if not me.materials:
-					me.materials.append(mat)
-				else:
-					me.materials[0] = mat
+	for matname in mat_2_obj.keys():
+		print("Material:",matname)
+		#create or retrieve a material
+		if matname not in bpy.data.materials:
+			mat = bpy.data.materials.new(matname)
+			mat.specular_intensity = 0.0
+			mat.ambient = 1
+			mat.use_transparency = True
+		else:
+			mat = bpy.data.materials[matname]
 			
-			#find the image file candidates
-			textures = [file for file in os.listdir(matlibs) if file.lower() == matname.lower()+".tga"]
-			#print(textures)
-			#do something better?
-			if textures:
-				texture = textures[-1]
-				
-				if texture not in bpy.data.textures:
-					tex = bpy.data.textures.new(texture, type = 'IMAGE')
-					try:
-						img = bpy.data.images.load(os.path.join(matlibs, texture))
-					except:
-						print("Could not find image "+texture+", generating blank image!")
-						img = bpy.data.images.new(texture,1,1)
-					tex.image = img
-				else: tex = bpy.data.textures[texture]
-				#now create the slot in the material for the texture
-				mtex = mat.texture_slots.add()
-				mtex.texture = tex
-				mtex.texture_coords = 'UV'
-				mtex.use_map_color_diffuse = True 
-				mtex.use_map_color_emission = True 
-				mtex.emission_color_factor = 0.5
-				mtex.uv_layer = "UV"
-				
-				#assign textures to mesh
-				for ob in mat_2_obj[matname]:
-					me = ob.data
-					
-					#reversed so the last is shown
-					for mtex in reversed(mat.texture_slots):
-						if mtex:
-							for texface in me.uv_textures["UV"].data:
-								texface.image = mtex.texture.image
-					#and for rendering, make sure each poly is assigned to the material
-					for f in me.polygons:
-						f.material_index = 0
-	except:
-		log_error('Material creation failed!')
-	
-	#store the vars
-	text_ob = get_text()
-	text_ob.clear()
-	text_ob.write(str(vars))
+		#find the image file candidates
+		textures = [file for file in os.listdir(matlibs) if file.lower() == matname.lower()+".tga"]
+		#do something better?
+		if textures:
+			texture = textures[-1]
+			if texture not in bpy.data.textures:
+				tex = bpy.data.textures.new(texture, type = 'IMAGE')
+				try:
+					img = bpy.data.images.load(os.path.join(matlibs, texture))
+				except:
+					print("Could not find image "+texture+", generating blank image!")
+					img = bpy.data.images.new(texture,1,1)
+				tex.image = img
+			else: tex = bpy.data.textures[texture]
+			#now create the slot in the material for the texture
+			mtex = mat.texture_slots.add()
+			mtex.texture = tex
+			mtex.texture_coords = 'UV'
+			mtex.use_map_color_diffuse = True 
+			mtex.use_map_color_emission = True 
+			mtex.emission_color_factor = 0.5
+			mtex.uv_layer = "UV"
+			
+		#even if no TMLs were found, we still get a dummy material (for re-export!)
+		for ob in mat_2_obj[matname]:
+			me = ob.data
+			me.materials.append(mat)
+			#assign textures to mesh
+			#reversed so the last is shown
+			for mtex in reversed(mat.texture_slots):
+				if mtex:
+					for texface in me.uv_textures["UV"].data:
+						texface.image = mtex.texture.image
 	
 	success = '\nFinished TMD Import in %.2f seconds\n' %(time.clock()-starttime)
 	print(success)
