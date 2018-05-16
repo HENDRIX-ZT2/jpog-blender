@@ -20,10 +20,12 @@ class ApplyScaleToObAndAnims(bpy.types.Operator):
 	bl_idname = "object.apply_scale_ob_anims"
 	bl_label = "Apply Scale to Objects and Animations"
 	bl_options = {'REGISTER', 'UNDO'}
+	change_speed = BoolProperty(name="Adjust Speed", description="Counter the scale with a speed adjustment to prevent slithering.", default=False)
 			
 	def execute(self, context):
 		from . import apply_scale_ob_anims
-		apply_scale_ob_anims.run()
+		keywords = self.as_keywords(ignore=("axis_forward", "axis_up", "filter_glob"))
+		apply_scale_ob_anims.run(self, context, **keywords)
 		return {'FINISHED'}
 	
 class ImportTMD(bpy.types.Operator, ImportHelper):

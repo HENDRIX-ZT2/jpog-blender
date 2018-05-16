@@ -1,6 +1,6 @@
 import bpy
 
-def run():
+def run(operator, context, change_speed = False):
 	print("Apply scale to objects & anims")
 	
 	#get the armature
@@ -26,6 +26,10 @@ def run():
 			for fcu in translations:
 				for i in range(0, len(fcu.keyframe_points)):
 					fcu.keyframe_points[i].co[1] *= scale
+		if change_speed:
+			for fcu in action.fcurves:
+				for i in range(0, len(fcu.keyframe_points)):
+					fcu.keyframe_points[i].co[0] *= scale
 	#redraw
 	bpy.context.scene.frame_set(bpy.context.scene.frame_current)
 	bpy.context.scene.update()
