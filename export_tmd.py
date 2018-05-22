@@ -27,9 +27,11 @@ def log_error(error):
 	global errors
 	errors.append(error)
 			
-def save(operator, context, filepath = '', export_anims = False, create_lods = False, pad_anims = False, numlods = 1, rate = 1):
+def save(operator, context, filepath = '', export_anims = False, pad_anims = False):
 
 	MAX_BONES_PER_PIECE = 27
+	MAX_PIECES = 4
+	PIECE_LEN = 7500
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 
@@ -138,14 +140,7 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 			channel_pointer_bytes = []
 			channel_bytes = []
 			
-			#by definition, a secondary anim will have some bones unkeyframed
-			# ub1 = 0
-			# for bone_name in bone_names:
-				# if bone_name not in action.groups:
-					# ub1 = 1
-					# break
-			# #not sure
-			# ub2 = 0
+			#decode the action name
 			action_name = action.name[:-2]
 			ub1 = int(action.name[-2])
 			ub2 = int(action.name[-1])
@@ -303,19 +298,20 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 				if mod.type in ('ARMATURE','TRIANGULATE'):
 					ob.modifiers.remove(mod)
 			ob.modifiers.new('Triangulate', 'TRIANGULATE')
-			#make a copy with all modifiers applied - I think there was another way to do it too
+			#make a copy with all modifiers applied
 			me = ob.to_mesh(bpy.context.scene, True, "PREVIEW", calc_tessface=True, calc_undeformed=False)
+			
+			if not me.polygons:
+				log_error("Mesh "+ob.name+" contains no faces and will be ignored!")
+				continue
+			
 			me.calc_normals_split()
 			#and restore the armature modifier
 			ob.modifiers.new('SkinDeform', 'ARMATURE').object = armature
 			
 			#initialize the piece lists
-			max_pieces = 4
-			bones_pieces = []
-			tris_pieces = []
-			for i in range(0, max_pieces):
-				bones_pieces.append([])
-				tris_pieces.append([])
+			bones_pieces = [ [] for i in range(0, MAX_PIECES) ]
+			tris_pieces = [ [] for i in range(0, MAX_PIECES) ]
 				
 			print("Splitting into pieces of <= 28 bones")
 			#first step:
@@ -334,7 +330,7 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 							tri_bones.add(bone_name)
 					
 				#go over all pieces and see where we can add this tri
-				for i in range(0, max_pieces):
+				for i in range(0, MAX_PIECES):
 					#see how many bones this triangle would add to the piece
 					bones_to_add = sum([1 for bone_name in tri_bones if bone_name not in bones_pieces[i]])
 					
@@ -360,7 +356,7 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 			mesh_vertices = []
 			dummy_vertices = []
 			#do the second splitting
-			for temp_piece_i in range(0, max_pieces):
+			for temp_piece_i in range(0, MAX_PIECES):
 				if bones_pieces[temp_piece_i]:
 					print("\nProcessing temp piece", temp_piece_i)
 					print("temp tris:", len(tris_pieces[temp_piece_i]))
@@ -384,7 +380,6 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 								if bone_weight > 0 and bone_name in bone_names:
 									w.append((int(bones_pieces[temp_piece_i].index(bone_name) * 3), bone_weight))
 
-							#could also check len(w_s)
 							if not w:
 								log_error("Weight painting error, at least one vertex is not weighted!")
 								return errors
@@ -417,10 +412,8 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 					in_strip = stripify(tmd_piece_tris, stitchstrips = True)[0]
 					
 					#then we must split
-					piece_len = 7500
-					overlap = 2
-					for n in range(0, len(in_strip), piece_len):
-						piece_data.append((in_strip[n : piece_len+n+overlap], bones_pieces[temp_piece_i]))
+					for n in range(0, len(in_strip), PIECE_LEN):
+						piece_data.append((in_strip[n : PIECE_LEN+n+2], bones_pieces[temp_piece_i]))
 						
 			num_pieces = len(piece_data)
 			num_all_strip_indices = sum([len(strip) for strip, piece_bone_names in piece_data])
@@ -430,7 +423,12 @@ def save(operator, context, filepath = '', export_anims = False, create_lods = F
 			print("pieces:",num_pieces)
 			print("all_strip_entries:",num_all_strip_indices)
 			print("all_verts:",num_all_verts)
-			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, me.materials[0].name.encode("utf-8")))
+			try:
+				material_name = me.materials[0].name
+			except:
+				material_name = "none"
+				log_error(ob.name+" has no material, set to 'none'!")
+			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, material_name.encode("utf-8")))
 			for piece_i in range(0, len(piece_data)):
 				
 				print("\nWriting piece",piece_i)
