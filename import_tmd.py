@@ -13,14 +13,6 @@ def create_ob(ob_name, ob_data):
 	bpy.context.scene.objects.active = ob
 	return ob
 
-def get_text():
-	text_name = "JPOG.txt"
-	if text_name not in bpy.data.texts:
-		text_ob = bpy.data.texts.new(text_name)
-	else:
-		text_ob = bpy.data.texts[text_name]
-	return text_ob
-
 def export_matrix(mat):
 	bytes = b''
 	for row in mat: bytes += pack('=4f',*row)
@@ -225,7 +217,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		num_meshes_in_lod, u6, s_x, s_y, s_z, d = unpack_from("I f 4f ", datastream, pos)
 		
 		print("Meshes in LOD:",num_meshes_in_lod)
-		print(u6, s_x, s_y, s_z, d)
+		#print(u6, s_x, s_y, s_z, d)
 		pos+=24
 		for mesh in range(0,num_meshes_in_lod):
 			num_pieces, num_all_strip_indices, num_all_verts, matname = unpack_from("3I 32s ", datastream, pos)
@@ -261,9 +253,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				mesh_tristrips.append(unpack_from(str(num_strip_indices)+"h ", datastream, pos))
 				#print([bone_names[i] for i in mesh_piece_node_indices[meshpiece]])
 				pos += 2*num_strip_indices
-			#print(mesh_verts)
-			#print(mesh_tristrips)
 			for tristrip, piece_node_indices in zip(mesh_tristrips, mesh_piece_node_indices):
+				#print(piece_node_indices)
+				#print([bone_names[p] for p in piece_node_indices])
 				#to resolve the rigging correctly, the weights must be resolved in the piece where they are used in the tristrip
 				for i in tristrip:
 					#we could do
