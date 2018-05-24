@@ -197,31 +197,19 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	armature.layers = select_layer(5)
 
 	pos = lod_data_offset + 60
-	#124 124 5756
-	# = 206568 + 60
-	#print(lod_data_offset)
-	#max_lod_distance just a guess but sound, and 
+	#max_lod_distance just a gues
 	num_lods, max_lod_distance = unpack_from("I f", datastream, pos)
-	print("max_lod_distance", max_lod_distance)
 	print("Number of LODs:",num_lods)
 	pos+=8
-	
-	#max_lod_distance 34.92011260986328
-	#0.0 2.0976476669311523 -1.001983642578125 3.7165191173553467 30.53643798828125
-	#max_lod_distance 6.398754596710205
-	#0.0 0.26798370480537415 -0.06812041997909546 -0.0847543329000473 6.109550476074219
-	#0 5% -2% 10% 90%
+
 	for level in range(0,num_lods):
-		#possibly LOD extents, ie. near far distance and bias?
-		#note that these values are the same for all lods
+		#these are apparently a bounding volume as a sphere, but not certainly - seemingly unimportant
 		num_meshes_in_lod, u6, s_x, s_y, s_z, d = unpack_from("I f 4f ", datastream, pos)
 		
 		print("Meshes in LOD:",num_meshes_in_lod)
-		#print(u6, s_x, s_y, s_z, d)
 		pos+=24
 		for mesh in range(0,num_meshes_in_lod):
 			num_pieces, num_all_strip_indices, num_all_verts, matname = unpack_from("3I 32s ", datastream, pos)
-			#print(num_pieces, num_all_strip_indices, num_all_verts, matname)
 			pos+=44
 			#these lists are extended by every piece
 			mesh_verts = []
@@ -235,12 +223,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			for meshpiece in range(0,num_pieces):
 				print("Piece:",meshpiece)
 				num_strip_indices, num_verts, num_piece_nodes, num_highest_index, bbc_x, bbc_y, bbc_z, bbe_x, bbe_y, bbe_z = unpack_from("4I 3f 3f", datastream, pos)
-				print("Verts:",num_verts)
-				print("Nodes:",num_piece_nodes)
-				print("num_strip_indices:",num_strip_indices)
-				print("Highest vert index:",num_highest_index)
 				pos += 40
-
 				#the nodes used by this mesh - used in the lookup for the bone weights
 				mesh_piece_node_indices.append(unpack_from(str(num_piece_nodes)+"I ", datastream, pos))
 				pos += 4*num_piece_nodes
@@ -249,13 +232,10 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				mesh_verts.extend(list(iter_unpack("3f 3f 4B 4B 2f", datastream[pos : pos+40*num_verts])))
 				pos += 40*num_verts
 				#verts can be referred to from another piece!
-				print("stripstart",pos)
 				mesh_tristrips.append(unpack_from(str(num_strip_indices)+"h ", datastream, pos))
 				#print([bone_names[i] for i in mesh_piece_node_indices[meshpiece]])
 				pos += 2*num_strip_indices
 			for tristrip, piece_node_indices in zip(mesh_tristrips, mesh_piece_node_indices):
-				#print(piece_node_indices)
-				#print([bone_names[p] for p in piece_node_indices])
 				#to resolve the rigging correctly, the weights must be resolved in the piece where they are used in the tristrip
 				for i in tristrip:
 					#we could do

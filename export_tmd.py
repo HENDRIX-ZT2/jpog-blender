@@ -270,7 +270,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	#find all models
 	lod_bytes = []
 	lods = []
-
 	for i in range(0,10):
 		lod = [ob for ob in armature.children if "_LOD"+str(i) in ob.name]
 		if lod: lods.append(lod)
@@ -282,14 +281,12 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	max_lod_distance = 2 * max(max(ob.dimensions) for ob in armature.children)
 	lod_bytes.append(pack('I f', len(lods), max_lod_distance))
 	for lod in lods:
-		#possibly LOD extents, ie. near far distance and bias?
-		#note that these values are the same for all lods
-		#might also be some bounding volume, sphere maybe (f3 = diameter)
-		f0 = 0.05 * max_lod_distance
-		f1 = -0.02 * max_lod_distance
-		f2 = 0.1 * max_lod_distance
-		f3 = 0.9 * max_lod_distance
-		lod_bytes.append(pack('I f 4f ',len(lod), 0, f0, f1, f2, f3))
+		#todo: get these from the bounding box or center of gravity; note that x and y should be swizzled
+		s_x = 0.05 * max_lod_distance
+		s_y = -0.02 * max_lod_distance
+		s_z = 0.1 * max_lod_distance
+		d = 0.9 * max_lod_distance
+		lod_bytes.append(pack('I f 4f ',len(lod), 0, s_x, s_y, s_z, d))
 		for ob in lod:
 			print("\nProcessing mesh of",ob.name)
 			
@@ -358,9 +355,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			#do the second splitting
 			for temp_piece_i in range(0, MAX_PIECES):
 				if bones_pieces[temp_piece_i]:
-					print("\nProcessing temp piece", temp_piece_i)
-					print("temp tris:", len(tris_pieces[temp_piece_i]))
-					print("temp bones:", len(bones_pieces[temp_piece_i]))
+					print("Processing temp piece", temp_piece_i)
 					
 					#at this point we have the tris in the right pieces, so all verts that are used in piece 0 will exist for piece 1 (incase we want to reuse them)
 					tmd_piece_tris = []
@@ -370,7 +365,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 							vertex = me.vertices[me.loops[loop_index].vertex_index]
 							co = vertex.co
 							no = me.loops[loop_index].normal
-							#no = vertex.normal
 							w = []
 							#we can only look up the name here, and index it per piece
 							for vertex_group in vertex.groups:
@@ -399,7 +393,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 							
 							#the final vert
 							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
-							dummy = pack('3f 2f', co.x, co.y, co.z, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
+							dummy = pack('3f 2f 4B', co.x, co.y, co.z, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y, *b)
 							#we could probably spread them out by pieces, but it doesn't seem to be required
 							if dummy not in dummy_vertices:
 								dummy_vertices.append(dummy)
@@ -420,9 +414,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			num_all_verts = len(mesh_vertices)
 			
 			print("\nWriting mesh",ob.name)
-			print("pieces:",num_pieces)
-			print("all_strip_entries:",num_all_strip_indices)
-			print("all_verts:",num_all_verts)
 			try:
 				material_name = me.materials[0].name
 			except:
@@ -430,21 +421,9 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 				log_error(ob.name+" has no material, set to 'none'!")
 			lod_bytes.append(pack("3I 32s ", num_pieces, num_all_strip_indices, num_all_verts, material_name.encode("utf-8")))
 			for piece_i in range(0, len(piece_data)):
-				
-				print("\nWriting piece",piece_i)
+				print("Writing piece",piece_i)
 				strip, piece_bone_names = piece_data[piece_i]
-				# apparently, this does not fix the issue for acro
-				# for bone_name in piece_bone_names:
-					# bone = armature.data.bones[bone_name]
-					# if bone.parent:
-						# parent_name = bone.parent.name
-						# if parent_name not in piece_bone_names:
-							# if len(piece_bone_names) < MAX_BONES_PER_PIECE:
-								# print("Extending bone parent chain by",parent_name)
-								# piece_bone_names.append(parent_name)
-				#print(piece_bone_names)
-				print("piece_bones:", len(piece_bone_names))
-				
+
 				#note that these are for the whole object and not the piece - might have to be adjusted
 				bbc_x, bbc_y, bbc_z = 0.125 * sum((mathutils.Vector(b) for b in ob.bound_box), mathutils.Vector())
 				bbe_x, bbe_y, bbe_z = ob.dimensions
@@ -454,9 +433,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 				#if piece_i == len(piece_data)-1:
 				if piece_i == 0:
 					piece_verts = mesh_vertices
-				
-				print("strip_entries:", len(strip))
-				print("piece_verts:", len(piece_verts))
 				
 				#write the mesh_piece header
 				lod_bytes.append(pack("4I 3f 3f", len(strip), len(piece_verts), len(piece_bone_names), max(strip), bbc_x, bbc_y, bbc_z, bbe_x, bbe_y, bbe_z))
@@ -476,9 +452,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
 			
 			lod_offset = anim_pointer-60+len(anim_bytes)
-			print("node_data",node_data)
-			print("anim_pointer",anim_pointer)
-			print("lod_offset",lod_offset)
 			header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
 			f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 	except PermissionError:
