@@ -1,104 +1,24 @@
 import os
 import time
-import math
 import bpy
 import mathutils
 from struct import iter_unpack, unpack_from
 from subprocess import check_call
 from .utils.tristrip import triangulate
+from .common_tmd import errors, log_error, correction_local, correction_global, name_to_blender, mat3_to_vec_roll
 
-def name_to_blender(s):
-	s = s.rstrip(b"\x00").decode("utf-8")
-	if "_l_" in s:
-		s+= ".l"
-	elif "_L_" in s:
-		s+= ".L"
-	if "_r_" in s:
-		s+= ".r"
-	elif "_R_" in s:
-		s+= ".R"
-	return s.replace("_R_","_").replace("_L_","_").replace("_r_","_").replace("_l_","_")
-	
 def create_ob(ob_name, ob_data):
 	ob = bpy.data.objects.new(ob_name, ob_data)
 	bpy.context.scene.objects.link(ob)
 	bpy.context.scene.objects.active = ob
 	return ob
 
-def export_matrix(mat):
-	bytes = b''
-	for row in mat: bytes += pack('=4f',*row)
-	return bytes
-	
-def get_matrix(x): return mathutils.Matrix(list(iter_unpack('4f',datastream[x:x+64])))
-
 def select_layer(layer_nr): return tuple(i == layer_nr for i in range(0, 20))
 
-def log_error(error):
-	print(error)
-	global errors
-	errors.append(error)
-	
-def vec_roll_to_mat3(vec, roll):
-	#port of the updated C function from armature.c
-	#https://developer.blender.org/T39470
-	#note that C accesses columns first, so all matrix indices are swapped compared to the C version
-	
-	nor = vec.normalized()
-	THETA_THRESHOLD_NEGY = 1.0e-9
-	THETA_THRESHOLD_NEGY_CLOSE = 1.0e-5
-	
-	#create a 3x3 matrix
-	bMatrix = mathutils.Matrix().to_3x3()
-
-	theta = 1.0 + nor[1]
-
-	if (theta > THETA_THRESHOLD_NEGY_CLOSE) or ((nor[0] or nor[2]) and theta > THETA_THRESHOLD_NEGY):
-
-		bMatrix[1][0] = -nor[0]
-		bMatrix[0][1] = nor[0]
-		bMatrix[1][1] = nor[1]
-		bMatrix[2][1] = nor[2]
-		bMatrix[1][2] = -nor[2]
-		if theta > THETA_THRESHOLD_NEGY_CLOSE:
-			#If nor is far enough from -Y, apply the general case.
-			bMatrix[0][0] = 1 - nor[0] * nor[0] / theta
-			bMatrix[2][2] = 1 - nor[2] * nor[2] / theta
-			bMatrix[0][2] = bMatrix[2][0] = -nor[0] * nor[2] / theta
-		
-		else:
-			#If nor is too close to -Y, apply the special case.
-			theta = nor[0] * nor[0] + nor[2] * nor[2]
-			bMatrix[0][0] = (nor[0] + nor[2]) * (nor[0] - nor[2]) / -theta
-			bMatrix[2][2] = -bMatrix[0][0]
-			bMatrix[0][2] = bMatrix[2][0] = 2.0 * nor[0] * nor[2] / theta
-
-	else:
-		#If nor is -Y, simple symmetry by Z axis.
-		bMatrix = mathutils.Matrix().to_3x3()
-		bMatrix[0][0] = bMatrix[1][1] = -1.0
-
-	#Make Roll matrix
-	rMatrix = mathutils.Matrix.Rotation(roll, 3, nor)
-	
-	#Combine and output result
-	mat = rMatrix * bMatrix
-	return mat
-
-def mat3_to_vec_roll(mat):
-	#this hasn't changed
-	vec = mat.col[1]
-	vecmat = vec_roll_to_mat3(mat.col[1], 0)
-	vecmatinv = vecmat.inverted()
-	rollmat = vecmatinv * mat
-	roll = math.atan2(rollmat[0][2], rollmat[2][2])
-	return vec, roll
+def get_matrix(datastr): return mathutils.Matrix(list(iter_unpack('4f',datastr)))
 			
 def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False, extract_textures=False, set_fps=False):
 
-	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
-	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
-	
 	#set the visible layers for this scene
 	bools = []
 	for i in range(20):	 
@@ -107,11 +27,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	bpy.context.scene.layers = bools
 	
 	starttime = time.clock()
-	global errors
-	errors = []
 	
 	mat_2_obj = {}
-	global datastream
 	#when no object exists, or when we are in edit mode when script is run
 	try: bpy.ops.object.mode_set(mode='OBJECT')
 	except: pass
@@ -158,8 +75,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		x, y, z, w = unpack_from("4f", datastream, pos)
 		fallback_quat = mathutils.Quaternion((w,x,y,z))
 		#this is the finished matrix in armature ie. world space
-		bind = get_matrix(pos+16).transposed()
-		inv_bind = get_matrix(pos+80).transposed()
+		bind = get_matrix(datastream[pos+16:pos+80]).transposed()
+		#inv_bind = get_matrix(datastream[pos+80:pos+144]).transposed()
 		name_len =  unpack_from("B", datastream, pos+144)[0]
 		bone_name = name_to_blender(unpack_from(str(name_len)+"s", datastream, pos+145)[0])
 		bone_names.append(bone_name)
@@ -167,8 +84,6 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		fallback_trans = mathutils.Vector((x,y,z))
 		
 		#create a matrix from the fallback values
-		#technically, storing the translations would be enough
-		#but this is convenient
 		fallback_matrix[bone_name] = fallback_quat.to_matrix().to_4x4()
 		fallback_matrix[bone_name].translation = fallback_trans
 		pos+=176

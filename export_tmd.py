@@ -1,34 +1,11 @@
 import os
 import time
-import math
 import bpy
 import mathutils
 from struct import pack, unpack_from
 from .utils.tristrip import stripify
+from .common_tmd import errors, log_error, correction_local, correction_global, name_to_blender, name_to_tmd
 
-def name_to_blender(s):
-	s = s.rstrip(b"\x00").decode("utf-8")
-	if "_l_" in s:
-		s+= ".l"
-	elif "_L_" in s:
-		s+= ".L"
-	if "_r_" in s:
-		s+= ".r"
-	elif "_R_" in s:
-		s+= ".R"
-	return s.replace("_R_","_").replace("_L_","_").replace("_r_","_").replace("_l_","_")
-	
-def name_to_tmd(s):
-	if '.L' in s:
-		s = s[:2]+"L_"+s[2:-2]
-	elif '.R' in s:
-		s = s[:2]+"R_"+s[2:-2]
-	elif '.l' in s:
-		s = s[:2]+"l_"+s[2:-2]
-	elif '.r' in s:
-		s = s[:2]+"r_"+s[2:-2]
-	return s
-	
 def get_armature():
 	src_armatures = [ob for ob in bpy.data.objects if type(ob.data) == bpy.types.Armature]
 	#do we have armatures?
@@ -41,25 +18,17 @@ def get_armature():
 		return src_armatures[0]
 		
 def flatten(mat):
-	return [item for sublist in mat for item in sublist]
+	return [v for row in mat for v in row]
 	
-def log_error(error):
-	print(error)
-	global errors
-	errors.append(error)
-			
 def save(operator, context, filepath = '', export_anims = False, pad_anims = False):
 
 	MAX_BONES_PER_PIECE = 27
 	MAX_PIECES = 10
 	PIECE_LEN = 7500
-	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
-	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
 
 	print("\nStarting export to",filepath)
 	starttime = time.clock()
-	global errors
-	errors = []
+	out_dir = os.path.dirname(filepath)
 
 	armature = get_armature()
 	try:
@@ -70,47 +39,48 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	#read the original TMD - do three things max:
 	#1) always get some of the magic numbers from the header
 	print("Reading data from original",tmd_in_path)
-	with open(tmd_in_path, 'rb') as f:
-		header = f.read(130)
-		remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
-		tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
-		scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
-		aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
-		#decrypt the addresses
-		aux_node_data += 60 - salt
-		node_data += 60 - salt
-		anim_pointer += 60 - salt
-		if aux_node_data == 124:
-			anim_pointer = node_data
-			node_data = aux_node_data
-		#2) set the bone names list into the original order
-		#3) copy the anim_bytes block from the imported file	
-		if not export_anims:
-			f.seek(anim_pointer)	
-			anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
+	try:
+		with open(tmd_in_path, 'rb') as f:
+			header = f.read(130)
+			remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
+			tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
+			scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
+			aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
+			#decrypt the addresses
+			aux_node_data += 60 - salt
+			node_data += 60 - salt
+			anim_pointer += 60 - salt
+			if aux_node_data == 124:
+				anim_pointer = node_data
+				node_data = aux_node_data
+			#2) set the bone names list into the original order
+			#3) copy the anim_bytes block from the imported file	
+			if not export_anims:
+				f.seek(anim_pointer)	
+				anim_bytes = f.read(lod_data_offset + 60 - anim_pointer)
+			
+				f.seek(node_data)
+				node_bytes = f.read(176 * num_nodes)
+				pos = 0
+				#note that these are not necessarily sorted the same way as in blender's armature!
+				bone_names = []
+				for i in range(0, num_nodes):
+					name_len =  unpack_from("B", node_bytes, pos+144)[0]
+					bone_name = name_to_blender(unpack_from(str(name_len)+"s", node_bytes, pos+145)[0])
+					bone_names.append(bone_name)
+					pos+=176
+				#do all bones match up between TMD and blender?
+				if set(bone_names) != set(armature.data.bones.keys()):
+					log_error("Bone mismatch between source TMD and blender armature. If you have imported another model since, re-import the desired source model, delete it and try again. Alternatively, you might want to export custom anims.")
+					return errors
+			else:
+				# create a new sorting from blender bones, updated bones before non-updated bones.
+				b_bones = armature.data.bones.keys()
+				bone_names = [b for b in b_bones if armature.data.bones[b].use_deform] + [b for b in b_bones if not armature.data.bones[b].use_deform]
+	except FileNotFoundError:
+		log_error("Original tmd file not found! Make sure the armature's custom property 'tmd_path' points to an existing tmd file!")
+		return errors
 		
-			f.seek(node_data)
-			node_bytes = f.read(176 * num_nodes)
-			pos = 0
-			#note that these are not necessarily sorted the same way as in blender's armature!
-			bone_names = []
-			for i in range(0, num_nodes):
-				name_len =  unpack_from("B", node_bytes, pos+144)[0]
-				bone_name = name_to_blender(unpack_from(str(name_len)+"s", node_bytes, pos+145)[0])
-				bone_names.append(bone_name)
-				pos+=176
-			#do all bones match up between TMD and blender?
-			if set(bone_names) != set(armature.data.bones.keys()):
-				log_error("Bone mismatch between source TMD and blender armature. If you have imported another model since, re-import the desired source model, delete it and try again. Alternatively, you might want to export custom anims.")
-				return errors
-		else:
-			# create a new sorting from blender bones, updated bones before non-updated bones.
-			b_bones = armature.data.bones.keys()
-			bone_names = [b for b in b_bones if armature.data.bones[b].use_deform] + [b for b in b_bones if not armature.data.bones[b].use_deform]
-
-	#TODO: implement ZT2 like filtering at some point, so only baked anims are exported
-	animations = bpy.data.actions
-	num_anims = len(animations)
 	node_data = 124
 	anim_pointer = node_data + 176 * len(armature.data.bones)
 	bones_bytes = []
@@ -137,6 +107,8 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	bones_bytes = b"".join(bones_bytes)
 	
 	if export_anims:
+		animations = [action for action in bpy.data.actions if not action.name.startswith("*")]
+		num_anims = len(animations)
 		anim_bytes = []
 		channels_bytes = []
 		all_quats = []
@@ -202,10 +174,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 					#get the new curves because we deleted the original ones
 					rotations = [fcurve for fcurve in group.channels if fcurve.data_path.endswith("quaternion")]
 					translations = [fcurve for fcurve in group.channels if fcurve.data_path.endswith("location")]
-					
-				elif same_amount_of_keys:
-					#ok, but the keys could still be moved to different times
-					pass
 				
 				#first, create define how to get the timestamp and key matrix for this bone
 				if (not rotations) and (not translations):
@@ -269,7 +237,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 		#create an individualized dummy file which has to be merged, otherwise keep the old tkl_ref
 		if not pad_anims: tkl_ref = os.path.basename(filepath)[:-4][:6]
 		#create the TKL file
-		tkl_out_path = os.path.join(os.path.dirname(filepath), tkl_ref+".tkl")
+		tkl_out_path = os.path.join(out_dir, tkl_ref+".tkl")
 		print("\nWriting",tkl_out_path)
 		
 		#this is used for testing, so we just fill the TKL with dummy data to avoid crashes
@@ -285,7 +253,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			with open(tkl_out_path, 'wb') as f:
 				f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
 		except PermissionError:
-			log_error("You do not have writing permissions for "+os.path.dirname(filepath)+". Gain writing permissions there or export to another folder!")
+			log_error("You do not have writing permissions for "+out_dir+". Gain writing permissions there or export to another folder!")
 			return errors
 		
 	#find all models
@@ -412,15 +380,14 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 							b = [id for id, weight in w_s]
 							w = [int(weight / w_sum * 255) for id, weight in w_s]
 							
-							#the final vert
-							vert = pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y )
 							dummy = pack('3f 2f 4B', co.x, co.y, co.z, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y, *b)
 							#we could probably spread them out by pieces, but it doesn't seem to be required
 							if dummy not in dummy_vertices:
 								dummy_vertices.append(dummy)
-								mesh_vertices.append(vert)
+								#save the final vert
+								mesh_vertices.append( pack('3f 3f 4B 4B 2f', co.x, co.y, co.z, no.x, no.y, no.z, *w, *b, uv_layer[loop_index].uv.x, -uv_layer[loop_index].uv.y ) )
 							
-							# #get the corrected index for this tri
+							# get the corrected index for this tri
 							tmd_tri.append(dummy_vertices.index(dummy))
 						tmd_piece_tris.append(tmd_tri)
 					#there is just one input strip created from the triangles
@@ -476,7 +443,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
 			f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 	except PermissionError:
-		log_error("You do not have writing permissions for "+os.path.dirname(filepath)+". Gain writing permissions there or export to another folder!")
+		log_error("You do not have writing permissions for "+out_dir+". Gain writing permissions there or export to another folder!")
 		return errors
 		
 	success = '\nFinished TMD Export in %.2f seconds\n' %(time.clock()-starttime)
