@@ -6,6 +6,29 @@ import mathutils
 from struct import pack, unpack_from
 from .utils.tristrip import stripify
 
+def name_to_blender(s):
+	s = s.rstrip(b"\x00").decode("utf-8")
+	if "_l_" in s:
+		s+= ".l"
+	elif "_L_" in s:
+		s+= ".L"
+	if "_r_" in s:
+		s+= ".r"
+	elif "_R_" in s:
+		s+= ".R"
+	return s.replace("_R_","_").replace("_L_","_").replace("_r_","_").replace("_l_","_")
+	
+def name_to_tmd(s):
+	if '.L' in s:
+		s = s[:2]+"L_"+s[2:-2]
+	elif '.R' in s:
+		s = s[:2]+"R_"+s[2:-2]
+	elif '.l' in s:
+		s = s[:2]+"l_"+s[2:-2]
+	elif '.r' in s:
+		s = s[:2]+"r_"+s[2:-2]
+	return s
+	
 def get_armature():
 	src_armatures = [ob for ob in bpy.data.objects if type(ob.data) == bpy.types.Armature]
 	#do we have armatures?
@@ -17,10 +40,8 @@ def get_armature():
 				return sel_armatures[0]
 		return src_armatures[0]
 		
-def export_matrix(mat):
-	bytes = b''
-	for row in mat: bytes += pack('=4f',*row)
-	return bytes
+def flatten(mat):
+	return [item for sublist in mat for item in sublist]
 	
 def log_error(error):
 	print(error)
@@ -30,7 +51,7 @@ def log_error(error):
 def save(operator, context, filepath = '', export_anims = False, pad_anims = False):
 
 	MAX_BONES_PER_PIECE = 27
-	MAX_PIECES = 4
+	MAX_PIECES = 10
 	PIECE_LEN = 7500
 	correction_local = mathutils.Euler((math.radians(90), 0, math.radians(90))).to_matrix().to_4x4()
 	correction_global = mathutils.Euler((math.radians(-90), math.radians(-90), 0)).to_matrix().to_4x4()
@@ -75,7 +96,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			bone_names = []
 			for i in range(0, num_nodes):
 				name_len =  unpack_from("B", node_bytes, pos+144)[0]
-				bone_name = unpack_from(str(name_len)+"s", node_bytes, pos+145)[0].rstrip(b"\x00").decode("utf-8")
+				bone_name = name_to_blender(unpack_from(str(name_len)+"s", node_bytes, pos+145)[0])
 				bone_names.append(bone_name)
 				pos+=176
 			#do all bones match up between TMD and blender?
@@ -112,7 +133,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 		q = mat_local.to_quaternion()
 		l = mat_local.to_translation()
 		#note that on import, the bind is transposed right after reading, so here we do it in the very end 
-		bones_bytes.append( b"".join((pack('4f', q.x, q.y, q.z, q.w), export_matrix(bind.transposed()), export_matrix(bind.inverted().transposed()), pack('B 15s hH 3f', len(bone.name), bone_name.encode("utf-8"), parent_id, updates, *l) )))
+		bones_bytes.append( pack('4f 16f 16f B 15s hH 3f', q.x, q.y, q.z, q.w, *flatten(bind.transposed()), *flatten(bind.inverted().transposed()), len(bone.name), name_to_tmd(bone_name).encode("utf-8"), parent_id, updates, *l) )
 	bones_bytes = b"".join(bones_bytes)
 	
 	if export_anims:

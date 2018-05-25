@@ -6,7 +6,19 @@ import mathutils
 from struct import iter_unpack, unpack_from
 from subprocess import check_call
 from .utils.tristrip import triangulate
-		
+
+def name_to_blender(s):
+	s = s.rstrip(b"\x00").decode("utf-8")
+	if "_l_" in s:
+		s+= ".l"
+	elif "_L_" in s:
+		s+= ".L"
+	if "_r_" in s:
+		s+= ".r"
+	elif "_R_" in s:
+		s+= ".R"
+	return s.replace("_R_","_").replace("_L_","_").replace("_r_","_").replace("_l_","_")
+	
 def create_ob(ob_name, ob_data):
 	ob = bpy.data.objects.new(ob_name, ob_data)
 	bpy.context.scene.objects.link(ob)
@@ -149,7 +161,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		bind = get_matrix(pos+16).transposed()
 		inv_bind = get_matrix(pos+80).transposed()
 		name_len =  unpack_from("B", datastream, pos+144)[0]
-		bone_name = unpack_from(str(name_len)+"s", datastream, pos+145)[0].rstrip(b"\x00").decode("utf-8")
+		bone_name = name_to_blender(unpack_from(str(name_len)+"s", datastream, pos+145)[0])
 		bone_names.append(bone_name)
 		parent_id, updates, x, y, z = unpack_from("hH 3f", datastream, pos+160)
 		fallback_trans = mathutils.Vector((x,y,z))
