@@ -56,7 +56,7 @@ def mat3_to_vec_roll(mat):
 	#this hasn't changed
 	vec = mat.col[1]
 	vecmat = vec_roll_to_mat3(mat.col[1], 0)
-	vecmatinv = vecmat.inverted()
+	vecmatinv = vecmat.invert()
 	rollmat = vecmatinv * mat
 	roll = atan2(rollmat[0][2], rollmat[2][2])
 	return vec, roll

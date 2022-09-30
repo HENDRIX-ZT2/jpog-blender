@@ -7,10 +7,69 @@ from subprocess import check_call
 from .utils.tristrip import triangulate
 from .common_tmd import errors, log_error, correction_local, correction_global, name_to_blender, mat3_to_vec_roll
 
+def layers_get(object):
+    """Gets membership of object in 0-19 numbered layers/collections
+
+    returns: list of booleans with length of 20
+    """
+    if hasattr(object, "layers"):
+        return object.layers
+    else:
+        obj_colls = object.users_collection # get all collections object is in
+        collection_names = [coll.name for coll in obj_colls]
+        return [str(i) in collection_names for i in range(20)] # ordered bool list
+
+
+def layers_set(object, layers=[], context=None):
+    """Assign layers or assign/crate collections with 2.7/2.8 support
+
+    Arguments:
+        object: valid object from bpy.data.objects
+        layers: list of bools with a length of 20
+    """
+    if hasattr(object, "layers"):
+        # Blender 2.7x branch
+        object.layers = layers  # raises exception if not a bool list of len 20
+        return
+    
+    # Blender 2.8x branch, apply layers checks to force consistency with 2.7
+    if not context:
+        context = bpy.context
+    if len(layers) != 20:
+        # artificially force consistency with 2.8 layer counts
+        raise Exception("Length of layers should be 20")
+    elif sum([not isinstance(n, bool) for n in layers])>0:
+        # force that the list of layers is bools only
+        raise Exception("All layers elements must be booleans")
+    
+    # Create collection and assign object
+    for i, layer in enumerate(layers):
+        if str(i) not in bpy.data.collections and layer is False:
+            continue # collection doesn't exist, but not 'enabling layer' anyways
+        elif str(i) not in bpy.data.collections and layer is True:
+            collection = bpy.data.collections.new(name=str(i)) # create new one
+            context.scene.collection.children.link(collection) # add to scene
+        else:
+            collection = bpy.data.collections[str(i)] # careful of linked libraries!
+        
+        # now assign "layer visibility" by adding or removing to named collection
+        if layer is True:
+            # add object to layer if not already present
+            if object in collection.objects[:]:
+                continue
+            else:
+                collection.objects.link(object)
+        else:
+            # remove object from layer if present
+            if object not in collection.objects[:]:
+                continue
+            else:
+                collection.objects.unlink(object)
+
 def create_ob(ob_name, ob_data):
 	ob = bpy.data.objects.new(ob_name, ob_data)
-	bpy.context.scene.objects.link(ob)
-	bpy.context.scene.objects.active = ob
+	bpy.context.scene.collection.objects.link(ob)
+	bpy.context.view_layer.objects.active = ob
 	return ob
 
 def select_layer(layer_nr): return tuple(i == layer_nr for i in range(0, 20))
@@ -19,14 +78,17 @@ def get_matrix(datastr): return mathutils.Matrix(list(iter_unpack('4f',datastr))
 			
 def load(operator, context, filepath = "", use_custom_normals = False, use_anims=False, extract_textures=False, set_fps=False):
 
+	#collection = bpy.data.collections.new("Objects")
+	#bpy.context.scene.collection.children.link(collection)
 	#set the visible layers for this scene
-	bools = []
-	for i in range(20):	 
-		if i < 6: bools.append(True)
-		else: bools.append(False)
-	bpy.context.scene.layers = bools
+	#bools = []
+	#for i in range(20):	 
+	#	if i < 6: bools.append(True)
+	#	else: bools.append(False)
+	#layers_set(bpy.context.scene.collection.objects, bools)
+	#bpy.context.scene.layers = bools
 	
-	starttime = time.clock()
+	starttime = time.process_time()
 	
 	mat_2_obj = {}
 	#when no object exists, or when we are in edit mode when script is run
@@ -60,9 +122,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	arm_name = root_name[:-4]
 	arm_data = bpy.data.armatures.new(arm_name)
 	arm_data.show_axes = True
-	arm_data.draw_type = 'STICK'
+	arm_data.display_type = 'STICK'
 	armature = create_ob(arm_name, arm_data)
-	armature.show_x_ray = True
+	#armature.show_x_ray = True
 	armature["tmd_path"] = filepath
 	bpy.ops.object.mode_set(mode = 'EDIT')
 	
@@ -98,8 +160,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		#correct the bind pose matrix axis
 		#blender bones are Y forward, while bind is X forward - correction_local takes care of that
 		#this will result in a good looking skeleton, just globally rotated - correction_global fixes that
-		bind = correction_global * correction_local * bind * correction_local.inverted()
-		tail, roll = mat3_to_vec_roll(bind.to_3x3())
+		bind = correction_global @ correction_local @ bind @ correction_local.inverted()
+		
+		tail, roll = bpy.types.Bone.AxisRollFromMatrix(bind.to_3x3())
 		bone.head = bind.to_translation()
 		bone.tail = tail + bone.head
 		bone.roll = roll
@@ -121,7 +184,8 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			else:
 				bone.length = bone.parent.length
 	bpy.ops.object.mode_set(mode = 'OBJECT')
-	armature.layers = select_layer(5)
+	layers_set(armature, select_layer(5))
+	#armature.layers = select_layer(5)
 
 	pos = lod_data_offset + 60
 	#max_lod_distance just a gues
@@ -186,7 +250,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me.update()
 			ob = create_ob(name, me)
 			mat_2_obj[matname].append(ob)
-			ob.layers = select_layer(level)
+			layers_set(armature, select_layer(level))
 			
 			#weight painting
 			ob.parent = armature
@@ -195,11 +259,11 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			for i, weights in mesh_weights.items():
 				for bone_name, weight in zip(weights[0], weights[1]):
 					#could also do this in a preceding loop via used indices - faster!
-					if bone_name not in ob.vertex_groups: ob.vertex_groups.new(bone_name)
+					if bone_name not in ob.vertex_groups: ob.vertex_groups.new(name=bone_name)
 					ob.vertex_groups[bone_name].add([i], weight, 'REPLACE')
 					
 			#UV: flip V coordinate
-			me.uv_textures.new("UV")
+			me.uv_layers.new(name="UV")
 			me.uv_layers[-1].data.foreach_set("uv", [uv for pair in [mesh_verts[l.vertex_index][14:16] for l in me.loops] for uv in (pair[0], -pair[1])])
 			
 			#setting the normals works, but the effect is ruined by remove_doubles
@@ -292,9 +356,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 							
 							#and do local space correction only (as keyframes do not act in global space)
 							#we must make this matrix relative to the rest pose to conform with how blender bones work
-							key_matrix = fallback_matrix[bone_name].inverted() * key_matrix
-							key_matrix =  correction_local * key_matrix *correction_local.inverted()
-							key_frame = key_time*fps
+							key_matrix = fallback_matrix[bone_name].inverted() @ key_matrix
+							key_matrix = correction_local @ key_matrix @ correction_local.inverted()
+							key_frame = key_time * fps
 							if channel_mode in (3, 1):
 								for fcurve, key in zip(loc_fcurves, key_matrix.to_translation()):
 									fcurve.keyframe_points.insert(key_frame, key).interpolation = "LINEAR"
@@ -342,8 +406,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 		if matname not in bpy.data.materials:
 			mat = bpy.data.materials.new(matname)
 			mat.specular_intensity = 0.0
-			mat.ambient = 1
-			mat.use_transparency = True
+			mat.use_nodes = True
+			#mat.ambient = 1
+			#mat.use_transparency = True
 		else:
 			mat = bpy.data.materials[matname]
 			
@@ -362,13 +427,18 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 				tex.image = img
 			else: tex = bpy.data.textures[texture]
 			#now create the slot in the material for the texture
-			mtex = mat.texture_slots.add()
-			mtex.texture = tex
-			mtex.texture_coords = 'UV'
-			mtex.use_map_color_diffuse = True 
-			mtex.use_map_color_emission = True 
-			mtex.emission_color_factor = 0.5
-			mtex.uv_layer = "UV"
+			bsdf = mat.node_tree.nodes["Principled BSDF"]
+			mtex = mat.node_tree.nodes.new("ShaderNodeTexImage")
+			
+			mtex.image = tex.image
+			mat.node_tree.links.new(bsdf.inputs['Base Color'], mtex.outputs['Color'])
+			#mtex.texture = tex
+			#mtex.texture_coords = 'UV'
+			#mtex.use_map_color_diffuse = True 
+			#mtex.use_map_color_emission = True 
+			#mtex.emission_color_factor = 0.5
+			#mtex.uv_layer = "UV"
+
 			
 		#even if no TMLs were found, we still get a dummy material (for re-export!)
 		for ob in mat_2_obj[matname]:
@@ -376,11 +446,13 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me.materials.append(mat)
 			#assign textures to mesh
 			#reversed so the last is shown
-			for mtex in reversed(mat.texture_slots):
-				if mtex:
-					for texface in me.uv_textures["UV"].data:
-						texface.image = mtex.texture.image
+			for mtex in reversed(mat.node_tree.nodes):
+				if mtex.type == 'TEX_IMAGE':
+					for texface in me.uv_layers["UV"].data:
+						mtex.select = True
+						mat.node_tree.nodes.active = mtex
+						#texface.image = mtex.image
 	
-	success = '\nFinished TMD Import in %.2f seconds\n' %(time.clock()-starttime)
+	success = '\nFinished TMD Import in %.2f seconds\n' %(time.process_time()-starttime)
 	print(success)
 	return errors
