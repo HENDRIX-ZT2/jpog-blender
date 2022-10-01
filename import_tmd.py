@@ -72,6 +72,13 @@ def create_ob(ob_name, ob_data):
 	bpy.context.view_layer.objects.active = ob
 	return ob
 
+def hide_collection(bools):
+    i = 0
+    for b in bools:
+        if (b is True):
+            bpy.context.view_layer.layer_collection.children[i].hide_collection = True
+            i += 1
+
 def select_layer(layer_nr): return tuple(i == layer_nr for i in range(0, 20))
 
 def get_matrix(datastr): return mathutils.Matrix(list(iter_unpack('4f',datastr)))
@@ -124,7 +131,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 	arm_data.show_axes = True
 	arm_data.display_type = 'STICK'
 	armature = create_ob(arm_name, arm_data)
-	#armature.show_x_ray = True
+	armature.show_in_front = True
 	armature["tmd_path"] = filepath
 	bpy.ops.object.mode_set(mode = 'EDIT')
 	
@@ -250,7 +257,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me.update()
 			ob = create_ob(name, me)
 			mat_2_obj[matname].append(ob)
-			layers_set(armature, select_layer(level))
+			layers_set(ob, select_layer(level))
 			
 			#weight painting
 			ob.parent = armature

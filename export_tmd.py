@@ -89,7 +89,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	for bone_name in bone_names:
 		bone = armature.data.bones[bone_name]
 		#we get the original bind like this:
-		bind = correction_global.inverted() @  correction_local.inverted() @ bone.matrix_local @ correction_local
+		bind = correction_global.inverted() @ correction_local.inverted() @ bone.matrix_local @ correction_local
 		mat_local = bind
 		#only non-skeletal nodes can ignore updates
 		updates = 0 if bone.use_deform else 1
