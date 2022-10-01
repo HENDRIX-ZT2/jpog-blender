@@ -1,65 +1,11 @@
 from math import radians, atan2
 import mathutils
+import bpy
 
 global errors
 errors = []
 correction_local = mathutils.Euler((radians(90), 0, radians(90))).to_matrix().to_4x4()
 correction_global = mathutils.Euler((radians(-90), radians(-90), 0)).to_matrix().to_4x4()
-
-def vec_roll_to_mat3(vec, roll):
-	#port of the updated C function from armature.c
-	#https://developer.blender.org/T39470
-	#note that C accesses columns first, so all matrix indices are swapped compared to the C version
-	
-	nor = vec.normalized()
-	THETA_THRESHOLD_NEGY = 1.0e-9
-	THETA_THRESHOLD_NEGY_CLOSE = 1.0e-5
-	
-	#create a 3x3 matrix
-	bMatrix = mathutils.Matrix().to_3x3()
-
-	theta = 1.0 + nor[1]
-
-	if (theta > THETA_THRESHOLD_NEGY_CLOSE) or ((nor[0] or nor[2]) and theta > THETA_THRESHOLD_NEGY):
-
-		bMatrix[1][0] = -nor[0]
-		bMatrix[0][1] = nor[0]
-		bMatrix[1][1] = nor[1]
-		bMatrix[2][1] = nor[2]
-		bMatrix[1][2] = -nor[2]
-		if theta > THETA_THRESHOLD_NEGY_CLOSE:
-			#If nor is far enough from -Y, apply the general case.
-			bMatrix[0][0] = 1 - nor[0] * nor[0] / theta
-			bMatrix[2][2] = 1 - nor[2] * nor[2] / theta
-			bMatrix[0][2] = bMatrix[2][0] = -nor[0] * nor[2] / theta
-		
-		else:
-			#If nor is too close to -Y, apply the special case.
-			theta = nor[0] * nor[0] + nor[2] * nor[2]
-			bMatrix[0][0] = (nor[0] + nor[2]) * (nor[0] - nor[2]) / -theta
-			bMatrix[2][2] = -bMatrix[0][0]
-			bMatrix[0][2] = bMatrix[2][0] = 2.0 * nor[0] * nor[2] / theta
-
-	else:
-		#If nor is -Y, simple symmetry by Z axis.
-		bMatrix = mathutils.Matrix().to_3x3()
-		bMatrix[0][0] = bMatrix[1][1] = -1.0
-
-	#Make Roll matrix
-	rMatrix = mathutils.Matrix.Rotation(roll, 3, nor)
-	
-	#Combine and output result
-	mat = rMatrix * bMatrix
-	return mat
-
-def mat3_to_vec_roll(mat):
-	#this hasn't changed
-	vec = mat.col[1]
-	vecmat = vec_roll_to_mat3(mat.col[1], 0)
-	vecmatinv = vecmat.invert()
-	rollmat = vecmatinv * mat
-	roll = atan2(rollmat[0][2], rollmat[2][2])
-	return vec, roll
 	
 def name_to_blender(s):
 	s = s.rstrip(b"\x00").decode("utf-8")
@@ -88,3 +34,42 @@ def log_error(error):
 	print(error)
 	global errors
 	errors.append(error)
+
+# source: https://github.com/HENDRIX-ZT2/bfb-blender/blob/blender2.80/common_bfb.py
+# by Hendrix
+
+def LOD(ob, level):
+    """Adds a newly created object to a lod collection, creates one if neeed, and sets their visibility"""
+    lod_name = "LOD"+str(level)
+    if lod_name not in bpy.data.collections:
+        coll = bpy.data.collections.new(lod_name)
+        bpy.context.scene.collection.children.link(coll)
+    else:
+        coll = bpy.data.collections[lod_name]
+	# Link active object to the new collection
+    coll.objects.link(ob)
+	# show lod 0, hide the others
+    should_hide = level != 0
+	# hide object in view layer
+    hide_collection(lod_name, should_hide)
+	# hide object in view layer
+    ob.hide_set(should_hide, view_layer=bpy.context.view_layer)
+
+
+
+def hide_collection(lod_name, should_hide):
+	# get view layer, hide collection there
+	# print(list(x for x in bpy.context.view_layer.layer_collection.children))
+	bpy.context.view_layer.layer_collection.children[lod_name].hide_viewport = should_hide
+
+
+def ensure_active_object():
+	# ensure that we have objects in the scene
+	if bpy.context.scene.objects:
+		# operator needs an active object, set one if missing (eg. user had deleted the active object)
+		if not bpy.context.view_layer.objects.active:
+			bpy.context.view_layer.objects.active = bpy.context.scene.objects[0]
+		# now enter object mode on the active object, if we aren't already in it
+		bpy.ops.object.mode_set(mode="OBJECT")
+	else:
+		print("No objects in scene, nothing to export!")

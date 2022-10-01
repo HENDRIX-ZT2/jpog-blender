@@ -5,79 +5,13 @@ import mathutils
 from struct import iter_unpack, unpack_from
 from subprocess import check_call
 from .utils.tristrip import triangulate
-from .common_tmd import errors, log_error, correction_local, correction_global, name_to_blender, mat3_to_vec_roll
-
-def layers_get(object):
-    """Gets membership of object in 0-19 numbered layers/collections
-
-    returns: list of booleans with length of 20
-    """
-    if hasattr(object, "layers"):
-        return object.layers
-    else:
-        obj_colls = object.users_collection # get all collections object is in
-        collection_names = [coll.name for coll in obj_colls]
-        return [str(i) in collection_names for i in range(20)] # ordered bool list
-
-
-def layers_set(object, layers=[], context=None):
-    """Assign layers or assign/crate collections with 2.7/2.8 support
-
-    Arguments:
-        object: valid object from bpy.data.objects
-        layers: list of bools with a length of 20
-    """
-    if hasattr(object, "layers"):
-        # Blender 2.7x branch
-        object.layers = layers  # raises exception if not a bool list of len 20
-        return
-    
-    # Blender 2.8x branch, apply layers checks to force consistency with 2.7
-    if not context:
-        context = bpy.context
-    if len(layers) != 20:
-        # artificially force consistency with 2.8 layer counts
-        raise Exception("Length of layers should be 20")
-    elif sum([not isinstance(n, bool) for n in layers])>0:
-        # force that the list of layers is bools only
-        raise Exception("All layers elements must be booleans")
-    
-    # Create collection and assign object
-    for i, layer in enumerate(layers):
-        if str(i) not in bpy.data.collections and layer is False:
-            continue # collection doesn't exist, but not 'enabling layer' anyways
-        elif str(i) not in bpy.data.collections and layer is True:
-            collection = bpy.data.collections.new(name=str(i)) # create new one
-            context.scene.collection.children.link(collection) # add to scene
-        else:
-            collection = bpy.data.collections[str(i)] # careful of linked libraries!
-        
-        # now assign "layer visibility" by adding or removing to named collection
-        if layer is True:
-            # add object to layer if not already present
-            if object in collection.objects[:]:
-                continue
-            else:
-                collection.objects.link(object)
-        else:
-            # remove object from layer if present
-            if object not in collection.objects[:]:
-                continue
-            else:
-                collection.objects.unlink(object)
+from .common_tmd import LOD, errors, log_error, correction_local, correction_global, name_to_blender
 
 def create_ob(ob_name, ob_data):
 	ob = bpy.data.objects.new(ob_name, ob_data)
 	bpy.context.scene.collection.objects.link(ob)
 	bpy.context.view_layer.objects.active = ob
 	return ob
-
-def hide_collection(bools):
-    i = 0
-    for b in bools:
-        if (b is True):
-            bpy.context.view_layer.layer_collection.children[i].hide_collection = True
-            i += 1
 
 def select_layer(layer_nr): return tuple(i == layer_nr for i in range(0, 20))
 
@@ -191,7 +125,9 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			else:
 				bone.length = bone.parent.length
 	bpy.ops.object.mode_set(mode = 'OBJECT')
-	layers_set(armature, select_layer(5))
+	#layers_set(armature, select_layer(5))
+	
+	#hide_collection("5", True)
 	#armature.layers = select_layer(5)
 
 	pos = lod_data_offset + 60
@@ -257,8 +193,7 @@ def load(operator, context, filepath = "", use_custom_normals = False, use_anims
 			me.update()
 			ob = create_ob(name, me)
 			mat_2_obj[matname].append(ob)
-			layers_set(ob, select_layer(level))
-			
+			LOD(ob, level)
 			#weight painting
 			ob.parent = armature
 			mod = ob.modifiers.new('SkinDeform', 'ARMATURE')
