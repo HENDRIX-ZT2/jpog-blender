@@ -27,7 +27,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	PIECE_LEN = 7500
 
 	print("\nStarting export to",filepath)
-	starttime = time.clock()
+	starttime = time.process_time()
 	out_dir = os.path.dirname(filepath)
 
 	armature = get_armature()
@@ -89,15 +89,15 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	for bone_name in bone_names:
 		bone = armature.data.bones[bone_name]
 		#we get the original bind like this:
-		bind = correction_global.inverted() *  correction_local.inverted() * bone.matrix_local *  correction_local
+		bind = correction_global.inverted() @ correction_local.inverted() @ bone.matrix_local @ correction_local
 		mat_local = bind
 		#only non-skeletal nodes can ignore updates
 		updates = 0 if bone.use_deform else 1
 		parent_id = -1
 		if bone.parent:
 			parent_id = bone_names.index(bone.parent.name)
-			p_bind_restored = correction_global.inverted() *  correction_local.inverted() * bone.parent.matrix_local *  correction_local
-			mat_local = p_bind_restored.inverted() * mat_local
+			p_bind_restored = correction_global.inverted() @ correction_local.inverted() @ bone.parent.matrix_local @ correction_local
+			mat_local = p_bind_restored.inverted() @ mat_local
 		fallback_matrix[bone_name] = mat_local
 		#mind the order of quat keys when packing!
 		q = mat_local.to_quaternion()
@@ -209,8 +209,8 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 						log_error("Bone "+bone_name+" in "+action_name+" has incomplete / faulty keyframes.")
 					
 					#space conversion, simply inverse of import
-					key_matrix = correction_local.inverted() * key_matrix * correction_local
-					key_matrix = fallback_matrix[group.name] * key_matrix
+					key_matrix = correction_local.inverted() @ key_matrix @ correction_local
+					key_matrix = fallback_matrix[group.name] @ key_matrix
 					
 					q = key_matrix.to_quaternion()
 					l = key_matrix.to_translation()
@@ -284,8 +284,10 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 				if mod.type in ('ARMATURE','TRIANGULATE'):
 					ob.modifiers.remove(mod)
 			ob.modifiers.new('Triangulate', 'TRIANGULATE')
-			#make a copy with all modifiers applied
-			me = ob.to_mesh(bpy.context.scene, True, "PREVIEW", calc_tessface=True, calc_undeformed=False)
+			# make a copy with all modifiers applied
+			dg = bpy.context.evaluated_depsgraph_get()
+			eval_obj = ob.evaluated_get(dg)
+			me = eval_obj.to_mesh(preserve_all_data_layers=True, depsgraph=dg)
 			
 			if not me.polygons:
 				log_error("Mesh "+ob.name+" contains no faces and will be ignored!")
@@ -446,6 +448,6 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 		log_error("You do not have writing permissions for "+out_dir+". Gain writing permissions there or export to another folder!")
 		return errors
 		
-	success = '\nFinished TMD Export in %.2f seconds\n' %(time.clock()-starttime)
+	success = '\nFinished TMD Export in %.2f seconds\n' %(time.process_time()-starttime)
 	print(success)
 	return errors
