@@ -42,7 +42,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 	try:
 		with open(tmd_in_path, 'rb') as f:
 			header = f.read(130)
-			remaining_bytes, tkl_ref, magic_value1, magic_value2, lod_data_offset, salt, u1, u2 = unpack_from("I 8s 2L 4I", header, 8)
+			remaining_bytes, tkl_ref, lod_data_offset, salt, u1, u2 = unpack_from("I 16s 4I", header, 8)
 			tkl_ref = tkl_ref.split(b"\x00")[0].decode("utf-8")
 			scene_block_bytes, num_nodes, u3, num_anims, u4 = unpack_from("I 4H", header, 60)
 			aux_node_data, node_data, anim_pointer = unpack_from("3I", header, 60+56)
@@ -113,12 +113,7 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 		channels_bytes = []
 		all_quats = []
 		all_locs = []
-		#just get all vars
-		tkl_in_path = os.path.join(os.path.dirname(tmd_in_path), tkl_ref+".tkl")
-		with open(tkl_in_path, 'rb') as f:
-			tklstream = f.read(60)
-		tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_remaining_bytes, tkl_name, tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, num_loc, num_rot, tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_i04	=  unpack_from("4B I 6s 10B 2I 5I", tklstream, 4)
-		
+
 		fps = bpy.context.scene.render.fps
 		#note this is not encrypted here
 		offset = anim_pointer + len(animations) * 4
@@ -235,20 +230,38 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 		print("Final Rot keys:",len(all_quats))	
 		
 		#create an individualized dummy file which has to be merged, otherwise keep the old tkl_ref
-		if not pad_anims: tkl_ref = os.path.basename(filepath)[:-4][:6]
+		if not pad_anims: tkl_ref = os.path.basename(filepath)[:-4][:15]
 		#create the TKL file
 		tkl_out_path = os.path.join(out_dir, tkl_ref+".tkl")
 		print("\nWriting",tkl_out_path)
 		
+		# NOTE: Not needed anymore
 		#this is used for testing, so we just fill the TKL with dummy data to avoid crashes
-		if pad_anims:
-			all_locs.extend([all_locs[0] for x in range(num_loc-len(all_locs))])
-			all_quats.extend([all_quats[0] for x in range(num_rot-len(all_quats))])
+		# if pad_anims:
+		# 	all_locs.extend([all_locs[0] for x in range(num_loc-len(all_locs))])
+		# 	all_quats.extend([all_quats[0] for x in range(num_rot-len(all_quats))])
 		
-		tkl_locs = [pack("3f", *l) for l in all_locs]
-		tkl_quats = [pack("4f", q.x, q.y, q.z, q.w) for q in all_quats]
-		tkl_len_data = len(tkl_locs)*16 + len(tkl_quats)*12
-		tkl_header = pack("4s 4B I 6s 10B 2I 5I", b"TPKL", tkl_b00, tkl_b01, tkl_b02, tkl_b03, tkl_len_data+44, tkl_ref.encode("utf-8"), tkl_b04, tkl_b05, tkl_b06, tkl_b07, tkl_b08, tkl_b09, tkl_b10, tkl_b11, tkl_b12, tkl_b13, len(all_locs), len(all_quats), tkl_i00, tkl_i01, tkl_i02, tkl_i03, tkl_len_data)
+
+		tkl_locs   = [pack("3f", *l) for l in all_locs]
+		tkl_quats  = [pack("4f", q.x, q.y, q.z, q.w) for q in all_quats]
+		num_locs   = len(tkl_locs)
+		num_quats  = len(tkl_quats)
+		num_scales = 0              # Not used in JPOG
+		loc_size   = 12
+		quat_size  = 16
+		scale_size = 4
+
+		tkl_len_data = num_locs * loc_size + num_quats * quat_size
+		
+		# These are not used
+		tkl_offset_start = 0
+		tkl_offset_end   = tkl_len_data + 44
+
+		tkl_name_bytes = tkl_ref.encode("utf-8") + b'\x00'
+		if len(tkl_name_bytes) > 16:
+			tkl_name_bytes[15] = b'\x00'
+
+		tkl_header = pack("4s I I 16s 2I 5I", b"TPKL", tkl_offset_start, tkl_offset_end, tkl_name_bytes, len(all_locs), len(all_quats), num_scales, loc_size, quat_size, scale_size, tkl_len_data)
 		try:
 			with open(tkl_out_path, 'wb') as f:
 				f.write(b"".join( (tkl_header, b"".join(tkl_locs), b"".join(tkl_quats) ) ))
@@ -442,7 +455,12 @@ def save(operator, context, filepath = '', export_anims = False, pad_anims = Fal
 			remaining_bytes = 112 + len(bones_bytes) + len(anim_bytes) + len(lod_bytes)
 			
 			lod_offset = anim_pointer-60+len(anim_bytes)
-			header_bytes = pack('8s I 8s 2L 4I 4I', b"TMDL", remaining_bytes, tkl_ref.encode("utf-8"), magic_value1, magic_value2, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
+
+			tkl_name_bytes = tkl_ref.encode("utf-8") + b'\x00'
+			if len(tkl_name_bytes) > 16:
+				tkl_name_bytes[15] = b'\x00'
+
+			header_bytes = pack('8s I 16s 4I 4I', b"TMDL", remaining_bytes, tkl_name_bytes, lod_offset, salt, u1, u2, 0,0,0,0 )+ pack("I 4H 11I", lod_offset, len(bone_names), u3, num_anims, u4, 0,0,0,0,0,0,0,0,0,0,0)+ pack("2I", node_data-60+salt, anim_pointer-60+salt)
 			f.write(b"".join((header_bytes, bones_bytes, anim_bytes, lod_bytes)))
 	except PermissionError:
 		log_error("You do not have writing permissions for "+out_dir+". Gain writing permissions there or export to another folder!")
